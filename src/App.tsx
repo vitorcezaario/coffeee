@@ -14,16 +14,28 @@ import {
   SiteSettings,
 } from './data/archive';
 
-function isAdminPath(pathname: string): boolean {
-  return pathname === '/admin' || pathname.startsWith('/admin/');
+function isAdminRoute(pathname: string, hash: string): boolean {
+  const cleanHash = hash.replace(/^#/, '');
+  return (
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/') ||
+    cleanHash === '/admin' ||
+    cleanHash === 'admin' ||
+    cleanHash.startsWith('/admin/')
+  );
 }
 
 export default function App() {
-  const [pathname, setPathname] = useState<string>(() => window.location.pathname);
-  const onAdminPage = isAdminPath(pathname);
+  const [routeState, setRouteState] = useState<{ pathname: string; hash: string }>(() => ({
+    pathname: window.location.pathname,
+    hash: window.location.hash,
+  }));
+  const onAdminPage = isAdminRoute(routeState.pathname, routeState.hash);
 
   // Only show the intro loading animation when landing on the public home page
-  const [isLoading, setIsLoading] = useState<boolean>(() => !isAdminPath(window.location.pathname));
+  const [isLoading, setIsLoading] = useState<boolean>(
+    () => !isAdminRoute(window.location.pathname, window.location.hash),
+  );
   const [adminSession, setAdminSession] = useState<AdminSessionState | null>(null);
   const [layoutMode, setLayoutMode] = useState<PublicLayoutMode>('folha');
 
@@ -39,19 +51,26 @@ export default function App() {
   }, []);
 
   const navigate = useCallback((to: string) => {
-    if (window.location.pathname !== to) {
+    if (window.location.pathname !== to || window.location.hash) {
       window.history.pushState({}, '', to);
     }
-    setPathname(to);
+    setRouteState({ pathname: to, hash: '' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
   useEffect(() => {
-    const handlePopState = () => {
-      setPathname(window.location.pathname);
+    const syncRoute = () => {
+      setRouteState({
+        pathname: window.location.pathname,
+        hash: window.location.hash,
+      });
     };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('popstate', syncRoute);
+    window.addEventListener('hashchange', syncRoute);
+    return () => {
+      window.removeEventListener('popstate', syncRoute);
+      window.removeEventListener('hashchange', syncRoute);
+    };
   }, []);
 
   const fetchPortfolio = useCallback(async () => {
