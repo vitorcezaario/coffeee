@@ -1,91 +1,41 @@
 export type MediaKind = 'foto' | 'video';
-export type ArchiveFilter = 'tudo' | MediaKind;
+export type MediaAspect = 'portrait' | 'landscape' | 'square';
 
-export interface ArchiveItem {
-  id: string;
-  index: string;
+export interface PortfolioItem {
+  id: number;
   title: string;
   kind: MediaKind;
-  date: string;
-  duration?: string;
-  aspect: 'portrait' | 'landscape' | 'square';
-  swatchColor: string;
-  imageUrl?: string;
-  videoUrl?: string;
-  isUserUpload?: boolean;
+  aspect: MediaAspect;
+  mimeType: string;
+  duration: string | null;
+  sortOrder: number;
+  published: boolean;
+  createdAt: string;
+  mediaUrl: string;
 }
 
-export const INITIAL_ARCHIVE_ITEMS: ArchiveItem[] = [
-  {
-    id: 'slot-001',
-    index: '001',
-    title: '',
-    kind: 'video',
-    date: '2026-10',
-    aspect: 'landscape',
-    swatchColor: '#1C1B1A',
-  },
-  {
-    id: 'slot-002',
-    index: '002',
-    title: '',
-    kind: 'foto',
-    date: '2026-10',
-    aspect: 'portrait',
-    swatchColor: '#D9D8D0',
-  },
-  {
-    id: 'slot-003',
-    index: '003',
-    title: '',
-    kind: 'foto',
-    date: '2026-09',
-    aspect: 'square',
-    swatchColor: '#3B2F28',
-  },
-  {
-    id: 'slot-004',
-    index: '004',
-    title: '',
-    kind: 'video',
-    date: '2026-09',
-    aspect: 'landscape',
-    swatchColor: '#1A3AFF',
-  },
-  {
-    id: 'slot-005',
-    index: '005',
-    title: '',
-    kind: 'foto',
-    date: '2026-08',
-    aspect: 'portrait',
-    swatchColor: '#C6C5BC',
-  },
-  {
-    id: 'slot-006',
-    index: '006',
-    title: '',
-    kind: 'foto',
-    date: '2026-07',
-    aspect: 'portrait',
-    swatchColor: '#2E2D2B',
-  },
-  {
-    id: 'slot-007',
-    index: '007',
-    title: '',
-    kind: 'video',
-    date: '2026-06',
-    aspect: 'landscape',
-    swatchColor: '#E4E3DC',
-  },
-  {
-    id: 'slot-008',
-    index: '008',
-    title: '',
-    kind: 'foto',
-    date: '2026-05',
-    aspect: 'portrait',
-    swatchColor: '#8C8980',
-  },
-];
+export interface SiteSettings {
+  siteName: string;
+  footerDescription: string;
+  contactEmail: string;
+  footerCredit: string;
+}
+
+export const DEFAULT_SITE_SETTINGS: SiteSettings = {
+  siteName: 'coffee',
+  footerDescription: 'arquivo pessoal, feito para portifolios customizados',
+  contactEmail: 'vitorcezario1@hotmail.com',
+  footerCredit: 'feito por vitor cezario',
+};
+
+export function formatItemDate(isoString: string): string {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = String(date.getFullYear());
+  return `${month}.${year}`;
+}
+
+export function formatItemIndex(position: number): string {
+  return String(position + 1).padStart(3, '0');
+}

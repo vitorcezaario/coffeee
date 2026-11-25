@@ -1,18 +1,20 @@
 import { useEffect } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { ArchiveItem } from '../data/archive';
+import { PortfolioItem } from '../data/archive';
 import { SafeImage } from './SafeImage';
 
 interface MediaLightboxProps {
-  item: ArchiveItem | null;
-  items: ArchiveItem[];
+  item: PortfolioItem | null;
+  items: PortfolioItem[];
+  resolvedUrls?: Record<number, string>;
   onClose: () => void;
-  onSelect: (item: ArchiveItem) => void;
+  onSelect: (item: PortfolioItem) => void;
 }
 
 export function MediaLightbox({
   item,
   items,
+  resolvedUrls,
   onClose,
   onSelect,
 }: MediaLightboxProps) {
@@ -43,12 +45,16 @@ export function MediaLightbox({
 
   if (!item) return null;
 
+  const mediaSrc = item.published
+    ? item.mediaUrl
+    : resolvedUrls?.[item.id] || '';
+
   return (
     <div
       className="fixed inset-0 z-50 bg-[#0A0A09] text-[#F7F7F5] flex items-center justify-center p-4 md:p-12"
       role="dialog"
       aria-modal="true"
-      aria-label={item.title || `Item ${item.index}`}
+      aria-label={item.title || `Item ${item.id}`}
       onClick={onClose}
     >
       {/* Floating minimal close control */}
@@ -66,39 +72,28 @@ export function MediaLightbox({
         </button>
       </div>
 
-      {/* Unobstructed media frame */}
+      {/* Unobstructed media frame — zero captions */}
       <div
         className="relative w-full h-full flex items-center justify-center"
         onClick={(e) => e.stopPropagation()}
       >
-        {item.kind === 'video' && item.videoUrl ? (
+        {!mediaSrc ? (
+          <div className="font-mono text-xs text-white/60">carregando...</div>
+        ) : item.kind === 'video' ? (
           <video
-            key={item.videoUrl}
-            src={item.videoUrl}
+            key={mediaSrc}
+            src={mediaSrc}
             controls
             autoPlay
             playsInline
             className="max-w-full max-h-[85vh] object-contain bg-black"
           />
-        ) : item.imageUrl ? (
-          <SafeImage
-            src={item.imageUrl}
-            alt={item.title || `Item ${item.index}`}
-            fallbackLabel={item.title || item.index}
-            className="max-w-full max-h-[85vh] object-contain"
-          />
         ) : (
-          <div
-            role="img"
-            aria-label={item.title || `Item ${item.index}`}
-            style={{ backgroundColor: item.swatchColor }}
-            className={`border border-white/10 ${
-              item.aspect === 'landscape'
-                ? 'w-full max-w-4xl aspect-[16/10]'
-                : item.aspect === 'square'
-                  ? 'w-full max-w-xl aspect-square'
-                  : 'h-[78vh] aspect-[3/4] max-w-full'
-            }`}
+          <SafeImage
+            src={mediaSrc}
+            alt={item.title || `Item ${item.id}`}
+            fallbackLabel={item.title || String(item.id)}
+            className="max-w-full max-h-[85vh] object-contain"
           />
         )}
 

@@ -1,117 +1,136 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { Play } from 'lucide-react';
-import { Header } from './components/Header';
+import { Header, PublicLayoutMode } from './components/Header';
 import { LoadingScreen } from './components/LoadingScreen';
 import { MediaLightbox } from './components/MediaLightbox';
 import { SafeImage } from './components/SafeImage';
+import { AdminPanel, AdminSessionState } from './components/AdminPanel';
 import {
-  ArchiveFilter,
-  ArchiveItem,
-  INITIAL_ARCHIVE_ITEMS,
+  DEFAULT_SITE_SETTINGS,
+  formatItemDate,
+  formatItemIndex,
+  PortfolioItem,
+  SiteSettings,
 } from './data/archive';
 
-type LayoutMode = 'folha' | 'fluxo' | 'indice';
+function isAdminPath(pathname: string): boolean {
+  return pathname === '/admin' || pathname.startsWith('/admin/');
+}
 
 export default function App() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [loaderKey, setLoaderKey] = useState(0);
-  const items = INITIAL_ARCHIVE_ITEMS;
-  const [activeFilter, setActiveFilter] = useState<ArchiveFilter>('tudo');
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('folha');
-  const [selectedItem, setSelectedItem] = useState<ArchiveItem | null>(null);
-  const [hoveredIndexItem, setHoveredIndexItem] = useState<ArchiveItem | null>(null);
+  const [pathname, setPathname] = useState<string>(() => window.location.pathname);
+  const onAdminPage = isAdminPath(pathname);
+
+  // Only show the intro loading animation when landing on the public home page
+  const [isLoading, setIsLoading] = useState<boolean>(() => !isAdminPath(window.location.pathname));
+  const [adminSession, setAdminSession] = useState<AdminSessionState | null>(null);
+  const [layoutMode, setLayoutMode] = useState<PublicLayoutMode>('folha');
+
+  const [items, setItems] = useState<PortfolioItem[]>([]);
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+  const [loadingPortfolio, setLoadingPortfolio] = useState(true);
+
+  const [selectedItem, setSelectedItem] = useState<PortfolioItem | null>(null);
+  const [hoveredIndexItem, setHoveredIndexItem] = useState<PortfolioItem | null>(null);
 
   const handleLoadingComplete = useCallback(() => {
     setIsLoading(false);
   }, []);
 
-  const handleReplayIntro = () => {
-    setLoaderKey((k) => k + 1);
-    setIsLoading(true);
-  };
+  const navigate = useCallback((to: string) => {
+    if (window.location.pathname !== to) {
+      window.history.pushState({}, '', to);
+    }
+    setPathname(to);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
-  const visibleItems =
-    activeFilter === 'tudo'
-      ? items
-      : items.filter((item) => item.kind === activeFilter);
+  useEffect(() => {
+    const handlePopState = () => {
+      setPathname(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
+  const fetchPortfolio = useCallback(async () => {
+    try {
+      const res = await fetch('/api/portfolio');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.settings) {
+        setSettings(data.settings);
+      }
+      if (Array.isArray(data.items)) {
+        setItems(data.items);
+      }
+    } catch {
+      // Keep current state silently on transient network error
+    } finally {
+      setLoadingPortfolio(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPortfolio();
+  }, [fetchPortfolio]);
+
+  useEffect(() => {
+    const baseName = settings.siteName || 'coffee';
+    document.title = onAdminPage ? `${baseName} / admin` : baseName;
+  }, [onAdminPage, settings.siteName]);
+
+  const handleNavigateHome = useCallback(() => {
+    navigate('/');
+    fetchPortfolio();
+  }, [fetchPortfolio, navigate]);
+
+  // Dedicated standalone Admin Page (/admin)
+  if (onAdminPage) {
+    return (
+      <AdminPanel
+        siteName={settings.siteName}
+        session={adminSession}
+        onSessionChange={setAdminSession}
+        onNavigateHome={handleNavigateHome}
+        onContentChanged={fetchPortfolio}
+      />
+    );
+  }
+
+  // Dedicated Public Home Page (/)
   return (
     <div className="min-h-screen bg-[#F7F7F5] text-[#111111] flex flex-col">
       <AnimatePresence>
-        {isLoading && (
-          <LoadingScreen key={loaderKey} onComplete={handleLoadingComplete} />
-        )}
+        {isLoading && <LoadingScreen onComplete={handleLoadingComplete} />}
       </AnimatePresence>
 
       <Header
-        activeFilter={activeFilter}
-        onSelectFilter={setActiveFilter}
-        onReplayIntro={handleReplayIntro}
+        siteName={settings.siteName}
+        publicLayoutMode={layoutMode}
+        hasPublicItems={items.length > 0}
+        itemCount={items.length}
+        onSelectPublicLayout={setLayoutMode}
       />
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-5 md:px-8">
-        {/* Raw Archival Strip — Zero Hero, Straight Into the Archive */}
-        <div className="py-5 border-b border-[#DCDCD4] flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
-          <div className="flex items-center gap-3 text-[#666662]">
-            <span className="text-[#111111]">arquivo pessoal</span>
-            <span aria-hidden="true">/</span>
-            <span className="tabular-nums">
-              {String(visibleItems.length).padStart(2, '0')} itens
-            </span>
-          </div>
-
-          {/* Mobile filter links + layout mode */}
-          <div className="flex items-center gap-6">
-            <div className="flex sm:hidden items-center gap-4 text-[#666662]">
-              {(['tudo', 'foto', 'video'] as ArchiveFilter[]).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setActiveFilter(f)}
-                  className={`cursor-pointer ${
-                    activeFilter === f ? 'text-[#111111] underline underline-offset-4' : ''
-                  }`}
-                >
-                  {f === 'foto' ? 'fotos' : f === 'video' ? 'vídeos' : 'tudo'}
-                </button>
-              ))}
-            </div>
-
-            <div
-              role="group"
-              aria-label="Modo de exibição"
-              className="flex items-center gap-4 text-[#666662]"
-            >
-              {(['folha', 'fluxo', 'indice'] as LayoutMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setLayoutMode(mode)}
-                  aria-pressed={layoutMode === mode}
-                  className={`transition-colors duration-150 cursor-pointer whitespace-nowrap shrink-0 ${
-                    layoutMode === mode
-                      ? 'text-[#111111] underline underline-offset-4 decoration-[#1A3AFF]'
-                      : 'hover:text-[#111111]'
-                  }`}
-                >
-                  {mode === 'indice' ? 'índice' : mode}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Archive Content Canvas */}
+        {/* Public Portfolio Canvas */}
         <section aria-label="Acervo" className="py-10 md:py-14">
-          {visibleItems.length === 0 ? (
+          {loadingPortfolio ? (
             <div className="py-24 text-center font-mono text-xs text-[#666662]">
-              <p>nenhum arquivo neste filtro.</p>
+              carregando...
+            </div>
+          ) : items.length === 0 ? (
+            <div className="py-24 md:py-32 max-w-md mx-auto text-center">
+              <p className="font-mono text-xs text-[#666662]">
+                o portfólio ainda está vazio.
+              </p>
             </div>
           ) : layoutMode === 'folha' ? (
-            /* Contact Sheet View — Raw, Unboxed, Natural Proportions */
+            /* Contact Sheet View */
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-12 items-end">
-              {visibleItems.map((item) => {
+              {items.map((item, idx) => {
                 const isWide = item.aspect === 'landscape';
                 const aspectClass =
                   item.aspect === 'landscape'
@@ -131,28 +150,30 @@ export default function App() {
                       className="group block w-full text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1A3AFF]"
                     >
                       <div
-                        className={`relative w-full overflow-hidden transition-opacity duration-150 group-hover:opacity-90 ${aspectClass}`}
-                        style={{ backgroundColor: item.swatchColor }}
+                        className={`relative w-full overflow-hidden bg-[#EAEAE4] transition-opacity duration-150 group-hover:opacity-90 ${aspectClass}`}
                       >
-                        {item.kind === 'video' && item.videoUrl ? (
+                        {item.kind === 'video' ? (
                           <video
-                            src={item.videoUrl}
+                            src={item.mediaUrl}
                             muted
                             playsInline
                             className="w-full h-full object-cover"
                           />
-                        ) : item.imageUrl ? (
+                        ) : (
                           <SafeImage
-                            src={item.imageUrl}
-                            alt={item.title || `Item ${item.index}`}
-                            fallbackLabel={item.title || item.index}
+                            src={item.mediaUrl}
+                            alt={item.title || `Item ${formatItemIndex(idx)}`}
+                            fallbackLabel={item.title || formatItemIndex(idx)}
                             className="w-full h-full object-cover"
                           />
-                        ) : null}
+                        )}
 
-                        {item.kind === 'video' && item.videoUrl && item.duration && (
+                        {item.kind === 'video' && item.duration && (
                           <span className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1.5 px-2 py-1 font-mono text-[11px] bg-[#0A0A09]/85 text-[#F7F7F5] border border-white/15 tabular-nums">
-                            <Play className="w-2.5 h-2.5 fill-current" aria-hidden="true" />
+                            <Play
+                              className="w-2.5 h-2.5 fill-current"
+                              aria-hidden="true"
+                            />
                             <span>{item.duration}</span>
                           </span>
                         )}
@@ -164,73 +185,7 @@ export default function App() {
                             {item.title}
                           </span>
                           <span className="text-[#666662] tabular-nums shrink-0">
-                            {item.date}
-                          </span>
-                        </div>
-                      )}
-                    </button>
-                  </article>
-                );
-              })}
-            </div>
-          ) : layoutMode === 'fluxo' ? (
-            /* Single-Column Raw Stream (Zine / Personal Diary Scroll) */
-            <div className="max-w-3xl mx-auto space-y-20">
-              {visibleItems.map((item) => {
-                const streamAspect =
-                  item.aspect === 'landscape'
-                    ? 'aspect-[16/10]'
-                    : item.aspect === 'square'
-                      ? 'aspect-square max-w-xl mx-auto'
-                      : 'aspect-[3/4] max-w-lg mx-auto';
-
-                return (
-                  <article key={item.id}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedItem(item)}
-                      className="group block w-full text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1A3AFF]"
-                    >
-                      <div
-                        className={`relative w-full overflow-hidden transition-opacity duration-150 group-hover:opacity-90 ${
-                          item.imageUrl || item.videoUrl ? 'bg-[#EAEAE4]' : streamAspect
-                        }`}
-                        style={{
-                          backgroundColor:
-                            item.imageUrl || item.videoUrl ? undefined : item.swatchColor,
-                        }}
-                      >
-                        {item.kind === 'video' && item.videoUrl ? (
-                          <video
-                            src={item.videoUrl}
-                            muted
-                            playsInline
-                            className="w-full max-h-[75vh] object-contain bg-[#0A0A09]"
-                          />
-                        ) : item.imageUrl ? (
-                          <SafeImage
-                            src={item.imageUrl}
-                            alt={item.title || `Item ${item.index}`}
-                            fallbackLabel={item.title || item.index}
-                            className="w-full max-h-[75vh] object-contain mx-auto"
-                          />
-                        ) : null}
-
-                        {item.kind === 'video' && item.videoUrl && item.duration && (
-                          <span className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1 font-mono text-xs bg-[#0A0A09]/85 text-[#F7F7F5] border border-white/15 tabular-nums">
-                            <Play className="w-3 h-3 fill-current" aria-hidden="true" />
-                            <span>{item.duration}</span>
-                          </span>
-                        )}
-                      </div>
-
-                      {item.title && (
-                        <div className="mt-3 flex items-baseline justify-between gap-4">
-                          <p className="text-sm text-[#111111] group-hover:text-[#1A3AFF] transition-colors">
-                            {item.title}
-                          </p>
-                          <span className="font-mono text-xs text-[#666662] tabular-nums whitespace-nowrap shrink-0">
-                            {item.date}
+                            {formatItemDate(item.createdAt)}
                           </span>
                         </div>
                       )}
@@ -243,7 +198,7 @@ export default function App() {
             /* Raw Text Directory Index with Side Hover Preview */
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
               <div className="lg:col-span-8 border-t border-[#DCDCD4]">
-                {visibleItems.map((item) => (
+                {items.map((item, idx) => (
                   <button
                     key={item.id}
                     type="button"
@@ -252,10 +207,10 @@ export default function App() {
                     onFocus={() => setHoveredIndexItem(item)}
                     className="w-full py-3.5 border-b border-[#DCDCD4] grid grid-cols-12 items-baseline gap-3 text-left font-mono text-xs hover:text-[#1A3AFF] transition-colors cursor-pointer group"
                   >
-                    <span className="col-span-2 sm:col-span-2 text-[#666662] tabular-nums">
-                      {item.index}
+                    <span className="col-span-2 text-[#666662] tabular-nums">
+                      {formatItemIndex(idx)}
                     </span>
-                    <span className="col-span-5 sm:col-span-5 text-[#111111] group-hover:text-[#1A3AFF] truncate">
+                    <span className="col-span-5 text-[#111111] group-hover:text-[#1A3AFF] truncate">
                       {item.title || '—'}
                     </span>
                     <span className="col-span-2 sm:col-span-3 text-[#666662] truncate">
@@ -263,7 +218,7 @@ export default function App() {
                       {item.duration ? ` · ${item.duration}` : ''}
                     </span>
                     <span className="col-span-3 sm:col-span-2 text-right text-[#666662] tabular-nums">
-                      {item.date}
+                      {formatItemDate(item.createdAt)}
                     </span>
                   </button>
                 ))}
@@ -271,29 +226,26 @@ export default function App() {
 
               <div className="hidden lg:block lg:col-span-4 sticky top-20">
                 {(() => {
-                  const preview = hoveredIndexItem || visibleItems[0];
+                  const preview = hoveredIndexItem || items[0];
                   if (!preview) return null;
                   return (
                     <div>
-                      <div
-                        className="overflow-hidden aspect-[4/3]"
-                        style={{ backgroundColor: preview.swatchColor }}
-                      >
-                        {preview.kind === 'video' && preview.videoUrl ? (
+                      <div className="overflow-hidden aspect-[4/3] bg-[#EAEAE4]">
+                        {preview.kind === 'video' ? (
                           <video
-                            src={preview.videoUrl}
+                            src={preview.mediaUrl}
                             muted
                             playsInline
                             className="w-full h-full object-cover"
                           />
-                        ) : preview.imageUrl ? (
+                        ) : (
                           <SafeImage
-                            src={preview.imageUrl}
-                            alt={preview.title || `Item ${preview.index}`}
-                            fallbackLabel={preview.title || preview.index}
+                            src={preview.mediaUrl}
+                            alt={preview.title || `Item ${preview.id}`}
+                            fallbackLabel={preview.title || String(preview.id)}
                             className="w-full h-full object-cover"
                           />
-                        ) : null}
+                        )}
                       </div>
                       {preview.title && (
                         <p className="mt-3 font-mono text-xs text-[#111111]">
@@ -308,41 +260,31 @@ export default function App() {
           )}
         </section>
 
-        {/* Minimal Raw Colophon / Info */}
-        <section
-          id="info"
-          className="border-t border-[#DCDCD4] py-10 grid grid-cols-1 md:grid-cols-12 gap-6 text-xs font-mono text-[#666662]"
-        >
+        {/* Minimal Raw Footer */}
+        <footer className="border-t border-[#DCDCD4] py-10 grid grid-cols-1 md:grid-cols-12 gap-6 text-xs font-mono text-[#666662]">
           <div className="md:col-span-6 space-y-1.5">
-            <p className="text-[#111111]">coffee</p>
+            <p className="text-[#111111]">{settings.siteName}</p>
             <p className="leading-relaxed max-w-md">
-              arquivo pessoal, feito para portifolios customizados
+              {settings.footerDescription}
             </p>
           </div>
           <div className="md:col-span-6 md:text-right flex flex-col md:items-end justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-5">
+            {settings.contactEmail && (
               <a
-                href="mailto:oi@coffee.archive"
+                href={`mailto:${settings.contactEmail}`}
                 className="text-[#111111] hover:text-[#1A3AFF] underline underline-offset-4"
               >
-                oi@coffee.archive
+                {settings.contactEmail}
               </a>
-              <button
-                type="button"
-                onClick={handleReplayIntro}
-                className="text-[#666662] hover:text-[#111111] underline underline-offset-4 cursor-pointer"
-              >
-                rever abertura
-              </button>
-            </div>
-            <span>feito por vitor cezario</span>
+            )}
+            <span>{settings.footerCredit}</span>
           </div>
-        </section>
+        </footer>
       </main>
 
       <MediaLightbox
         item={selectedItem}
-        items={visibleItems}
+        items={items}
         onClose={() => setSelectedItem(null)}
         onSelect={(next) => setSelectedItem(next)}
       />
