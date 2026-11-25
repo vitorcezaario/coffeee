@@ -9,6 +9,7 @@ export interface PortfolioItem {
   mimeType: string;
   duration: string | null;
   displayWidth: number | null;
+  displayHeight: number | null;
   sortOrder: number;
   published: boolean;
   createdAt: string;

@@ -5,7 +5,10 @@ import { LoadingScreen } from './components/LoadingScreen';
 import { MediaLightbox } from './components/MediaLightbox';
 import { SafeImage } from './components/SafeImage';
 import { AdminPanel, AdminSessionState } from './components/AdminPanel';
-import { ResizablePortfolioItem } from './components/ResizablePortfolioItem';
+import {
+  LayoutPatch,
+  ResizablePortfolioItem,
+} from './components/ResizablePortfolioItem';
 import {
   DEFAULT_SITE_SETTINGS,
   formatItemDate,
@@ -79,33 +82,85 @@ export default function App() {
     };
   }, []);
 
-  // Silently restore persistent admin session via HttpOnly cookie on initial load
-  useEffect(() => {
-    let cancelled = false;
-    const restoreSession = async () => {
+  const notifyAuthChanged = useCallback(() => {
+    if (typeof BroadcastChannel !== 'undefined') {
       try {
+        const channel = new BroadcastChannel('coffee_admin_auth');
+        channel.postMessage({ type: 'auth-changed' });
+        channel.close();
+      } catch {
+        // Ignore BroadcastChannel errors in restricted contexts
+      }
+    }
+  }, []);
+
+  const syncAuthSession = useCallback(
+    async (tokenOverride?: string | null) => {
+      try {
+        const headers: Record<string, string> = {};
+        if (tokenOverride) {
+          headers.Authorization = `Bearer ${tokenOverride}`;
+        }
         const res = await fetch('/api/admin/auth/me', {
           credentials: 'include',
+          cache: 'no-store',
+          headers,
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled && data.authenticated) {
-          setAdminSession({
+        if (data.authenticated) {
+          setAdminSession((prev) => ({
             username: data.username || 'admin',
             envPasscodeActive: Boolean(data.envPasscodeActive),
-          });
+            token: prev?.token ?? tokenOverride ?? null,
+          }));
+        } else {
+          setAdminSession(null);
+          setIsEditMode(false);
         }
       } catch {
         // Ignore transient network errors during silent session check
       } finally {
-        if (!cancelled) setSessionChecked(true);
+        setSessionChecked(true);
+      }
+    },
+    [],
+  );
+
+  // Restore & keep admin session in sync across reloads, focus, visibility, and tabs
+  useEffect(() => {
+    syncAuthSession(adminSession?.token);
+
+    const handleFocus = () => {
+      syncAuthSession(adminSession?.token);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncAuthSession(adminSession?.token);
       }
     };
-    restoreSession();
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    let channel: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        channel = new BroadcastChannel('coffee_admin_auth');
+        channel.onmessage = () => {
+          syncAuthSession();
+        };
+      } catch {
+        channel = null;
+      }
+    }
+
     return () => {
-      cancelled = true;
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (channel) channel.close();
     };
-  }, []);
+  }, [adminSession?.token, routeState.pathname, syncAuthSession]);
 
   const fetchPortfolio = useCallback(async (attempt = 0) => {
     try {
@@ -144,6 +199,17 @@ export default function App() {
     document.title = onAdminPage ? `${baseName} / admin` : baseName;
   }, [onAdminPage, settings.siteName]);
 
+  const handleSessionChange = useCallback(
+    (next: AdminSessionState | null) => {
+      setAdminSession(next);
+      if (!next) {
+        setIsEditMode(false);
+      }
+      notifyAuthChanged();
+    },
+    [notifyAuthChanged],
+  );
+
   const handleLogout = useCallback(async () => {
     try {
       const headers: Record<string, string> = {
@@ -162,8 +228,9 @@ export default function App() {
     } finally {
       setIsEditMode(false);
       setAdminSession(null);
+      notifyAuthChanged();
     }
-  }, [adminSession?.token]);
+  }, [adminSession?.token, notifyAuthChanged]);
 
   const handleToggleEditMode = useCallback(() => {
     setEditError(null);
@@ -184,7 +251,7 @@ export default function App() {
   }, []);
 
   const handleResizeCommit = useCallback(
-    async (id: number, displayWidth: number | null) => {
+    async (id: number, patch: LayoutPatch) => {
       if (!adminSession) return;
       setEditError(null);
       setSavingItemId(id);
@@ -192,7 +259,17 @@ export default function App() {
       // Optimistic update so the layout stays instant
       setItems((prev) =>
         prev.map((entry) =>
-          entry.id === id ? { ...entry, displayWidth } : entry,
+          entry.id === id
+            ? {
+                ...entry,
+                ...(patch.displayWidth !== undefined
+                  ? { displayWidth: patch.displayWidth }
+                  : {}),
+                ...(patch.displayHeight !== undefined
+                  ? { displayHeight: patch.displayHeight }
+                  : {}),
+              }
+            : entry,
         ),
       );
 
@@ -209,7 +286,7 @@ export default function App() {
           method: 'PATCH',
           credentials: 'include',
           headers,
-          body: JSON.stringify({ displayWidth }),
+          body: JSON.stringify(patch),
         });
 
         if (res.status === 401) {
@@ -239,6 +316,58 @@ export default function App() {
     [adminSession, fetchPortfolio],
   );
 
+  const handleMoveHomeItem = useCallback(
+    async (index: number, direction: -1 | 1) => {
+      if (!adminSession) return;
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= items.length) return;
+
+      const reordered = [...items];
+      const [moved] = reordered.splice(index, 1);
+      reordered.splice(targetIndex, 0, moved);
+
+      setEditError(null);
+      setSavingItemId(moved.id);
+      setItems(reordered);
+
+      try {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'coffee-admin',
+        };
+        if (adminSession.token) {
+          headers.Authorization = `Bearer ${adminSession.token}`;
+        }
+
+        const res = await fetch('/api/admin/items/reorder', {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify({ ids: reordered.map((entry) => entry.id) }),
+        });
+
+        if (res.status === 401) {
+          setIsEditMode(false);
+          setAdminSession(null);
+          return;
+        }
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Não foi possível salvar a ordem.');
+        }
+      } catch (err) {
+        setEditError(
+          err instanceof Error ? err.message : 'Erro ao reordenar itens.',
+        );
+        fetchPortfolio();
+      } finally {
+        setSavingItemId(null);
+      }
+    },
+    [adminSession, fetchPortfolio, items],
+  );
+
   const handleNavigateHome = useCallback(() => {
     navigate('/');
     fetchPortfolio();
@@ -251,7 +380,7 @@ export default function App() {
         siteName={settings.siteName}
         session={adminSession}
         sessionChecked={sessionChecked}
-        onSessionChange={setAdminSession}
+        onSessionChange={handleSessionChange}
         onLogout={handleLogout}
         onNavigateHome={handleNavigateHome}
         onContentChanged={fetchPortfolio}
@@ -275,6 +404,7 @@ export default function App() {
         isEditMode={isEditMode}
         onSelectPublicLayout={handleSelectPublicLayout}
         onToggleEditMode={handleToggleEditMode}
+        onDiscreetAdminAccess={() => navigate('/admin')}
       />
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-5 md:px-8">
@@ -282,7 +412,8 @@ export default function App() {
         {isEditMode && adminSession && (
           <div className="py-3 border-b border-[#DCDCD4] flex flex-wrap items-center justify-between gap-3 font-mono text-xs text-[#666662]">
             <span>
-              arraste o canto inferior direito ou use <span className="text-[#111111]">− / +</span> para redimensionar respeitando a resolução
+              modo livre · arraste as bordas ou o canto para ajustar largura e altura, ou use{' '}
+              <span className="text-[#111111]">← →</span> para reordenar
             </span>
             {editError ? (
               <span className="text-[#B91C1C]">{editError}</span>
@@ -307,7 +438,7 @@ export default function App() {
               </p>
             </div>
           ) : layoutMode === 'folha' ? (
-            /* Contact Sheet View — True Resolution Proportions + Admin Inline Resize */
+            /* Contact Sheet View — Free Admin Layout Editing */
             <div
               ref={galleryRef}
               className="flex flex-wrap items-end gap-x-6 gap-y-12"
@@ -317,11 +448,14 @@ export default function App() {
                   key={item.id}
                   item={item}
                   index={idx}
+                  canMovePrev={idx > 0}
+                  canMoveNext={idx < items.length - 1}
                   isEditMode={isEditMode && Boolean(adminSession)}
                   isSaving={savingItemId === item.id}
                   containerRef={galleryRef}
                   onSelect={setSelectedItem}
                   onResizeCommit={handleResizeCommit}
+                  onMove={(dir) => handleMoveHomeItem(idx, dir)}
                 />
               ))}
             </div>

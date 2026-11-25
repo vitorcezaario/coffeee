@@ -9,6 +9,7 @@ interface HeaderProps {
   isEditMode: boolean;
   onSelectPublicLayout: (mode: PublicLayoutMode) => void;
   onToggleEditMode: () => void;
+  onDiscreetAdminAccess: () => void;
 }
 
 export function Header({
@@ -20,6 +21,7 @@ export function Header({
   isEditMode,
   onSelectPublicLayout,
   onToggleEditMode,
+  onDiscreetAdminAccess,
 }: HeaderProps) {
   const handleLogoClick = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -32,6 +34,7 @@ export function Header({
         <button
           type="button"
           onClick={handleLogoClick}
+          onDoubleClick={onDiscreetAdminAccess}
           className="font-display text-lg font-bold tracking-[-0.04em] text-[#111111] whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1A3AFF]"
         >
           {siteName || 'coffee'}

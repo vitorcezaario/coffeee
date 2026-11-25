@@ -6,25 +6,45 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Minus, MoveDiagonal2, Play, Plus, RotateCcw } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Minus,
+  MoveDiagonal2,
+  Play,
+  Plus,
+  RotateCcw,
+} from 'lucide-react';
 import {
   formatItemDate,
   formatItemIndex,
   PortfolioItem,
 } from '../data/archive';
 
+export interface LayoutPatch {
+  displayWidth?: number | null;
+  displayHeight?: number | null;
+}
+
 interface ResizablePortfolioItemProps {
   item: PortfolioItem;
   index: number;
+  canMovePrev: boolean;
+  canMoveNext: boolean;
   isEditMode: boolean;
   isSaving: boolean;
   containerRef: RefObject<HTMLDivElement | null>;
   onSelect: (item: PortfolioItem) => void;
-  onResizeCommit: (id: number, displayWidth: number | null) => void;
+  onResizeCommit: (id: number, patch: LayoutPatch) => void;
+  onMove: (direction: -1 | 1) => void;
 }
 
-const MIN_WIDTH_PERCENT = 18;
+type ResizeAxis = 'x' | 'y' | 'xy';
+
+const MIN_WIDTH_PERCENT = 10;
 const MAX_WIDTH_PERCENT = 100;
+const MIN_HEIGHT_PX = 100;
+const MAX_HEIGHT_PX = 1200;
 
 function getDefaultWidthPercent(item: PortfolioItem): number {
   if (item.aspect === 'landscape') return 48;
@@ -34,59 +54,69 @@ function getDefaultWidthPercent(item: PortfolioItem): number {
 export function ResizablePortfolioItem({
   item,
   index,
+  canMovePrev,
+  canMoveNext,
   isEditMode,
   isSaving,
   containerRef,
   onSelect,
   onResizeCommit,
+  onMove,
 }: ResizablePortfolioItemProps) {
   const defaultPercent = getDefaultWidthPercent(item);
   const persistedPercent = item.displayWidth ?? defaultPercent;
 
   const [livePercent, setLivePercent] = useState<number>(persistedPercent);
+  const [liveHeight, setLiveHeight] = useState<number | null>(item.displayHeight ?? null);
   const [isDragging, setIsDragging] = useState(false);
-  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
 
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
+    axis: ResizeAxis;
     startX: number;
+    startY: number;
     startWidthPx: number;
+    startHeightPx: number;
     containerWidthPx: number;
     lastPercent: number;
+    lastHeight: number | null;
   } | null>(null);
 
   useEffect(() => {
     if (!isDragging) {
       setLivePercent(item.displayWidth ?? getDefaultWidthPercent(item));
+      setLiveHeight(item.displayHeight ?? null);
     }
-  }, [item.aspect, item.displayWidth, isDragging]);
+  }, [item.aspect, item.displayHeight, item.displayWidth, isDragging]);
 
   useEffect(() => {
     setLoadFailed(false);
   }, [item.mediaUrl]);
 
-  const computeMaxAllowedPercent = (containerWidthPx: number): number => {
-    if (!naturalSize || naturalSize.w < 240 || containerWidthPx <= 0) {
-      return MAX_WIDTH_PERCENT;
-    }
-    // Cap scaling at the file's native pixel width so it never blurs or exceeds native resolution
-    const maxByResolution = Math.floor((naturalSize.w / containerWidthPx) * 100);
-    return Math.max(MIN_WIDTH_PERCENT, Math.min(MAX_WIDTH_PERCENT, maxByResolution));
-  };
-
-  const handleResizePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const startResizeDrag = (
+    axis: ResizeAxis,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
     event.preventDefault();
     event.stopPropagation();
 
     const containerEl = containerRef.current;
     const containerWidthPx = containerEl ? containerEl.getBoundingClientRect().width : 1200;
     const startWidthPx = (livePercent / 100) * containerWidthPx;
+    const currentFrameHeight =
+      liveHeight ??
+      Math.round(frameRef.current?.getBoundingClientRect().height || 360);
 
     dragStateRef.current = {
+      axis,
       startX: event.clientX,
+      startY: event.clientY,
       startWidthPx,
+      startHeightPx: currentFrameHeight,
       containerWidthPx,
       lastPercent: livePercent,
+      lastHeight: axis === 'x' ? liveHeight : currentFrameHeight,
     };
 
     setIsDragging(true);
@@ -97,14 +127,28 @@ export function ResizablePortfolioItem({
     const drag = dragStateRef.current;
     if (!drag) return;
 
-    const deltaX = event.clientX - drag.startX;
-    const nextWidthPx = drag.startWidthPx + deltaX;
-    const rawPercent = Math.round((nextWidthPx / drag.containerWidthPx) * 100);
-    const maxAllowed = computeMaxAllowedPercent(drag.containerWidthPx);
-    const clamped = Math.max(MIN_WIDTH_PERCENT, Math.min(maxAllowed, rawPercent));
+    if (drag.axis === 'x' || drag.axis === 'xy') {
+      const deltaX = event.clientX - drag.startX;
+      const nextWidthPx = drag.startWidthPx + deltaX;
+      const rawPercent = Math.round((nextWidthPx / drag.containerWidthPx) * 100);
+      const clampedPercent = Math.max(
+        MIN_WIDTH_PERCENT,
+        Math.min(MAX_WIDTH_PERCENT, rawPercent),
+      );
+      drag.lastPercent = clampedPercent;
+      setLivePercent(clampedPercent);
+    }
 
-    drag.lastPercent = clamped;
-    setLivePercent(clamped);
+    if (drag.axis === 'y' || drag.axis === 'xy') {
+      const deltaY = event.clientY - drag.startY;
+      const nextHeightPx = Math.round(drag.startHeightPx + deltaY);
+      const clampedHeight = Math.max(
+        MIN_HEIGHT_PX,
+        Math.min(MAX_HEIGHT_PX, nextHeightPx),
+      );
+      drag.lastHeight = clampedHeight;
+      setLiveHeight(clampedHeight);
+    }
   };
 
   const handleResizePointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -115,43 +159,61 @@ export function ResizablePortfolioItem({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
-    const finalPercent = drag.lastPercent;
+    const patch: LayoutPatch = {};
+    if ((drag.axis === 'x' || drag.axis === 'xy') && drag.lastPercent !== item.displayWidth) {
+      patch.displayWidth = drag.lastPercent;
+    }
+    if ((drag.axis === 'y' || drag.axis === 'xy') && drag.lastHeight !== item.displayHeight) {
+      patch.displayHeight = drag.lastHeight;
+    }
+
     dragStateRef.current = null;
     setIsDragging(false);
 
-    if (finalPercent !== item.displayWidth) {
-      onResizeCommit(item.id, finalPercent);
+    if (patch.displayWidth !== undefined || patch.displayHeight !== undefined) {
+      onResizeCommit(item.id, patch);
     }
   };
 
-  const handleStep = (delta: number) => {
-    const containerWidthPx = containerRef.current?.getBoundingClientRect().width || 1200;
-    const maxAllowed = computeMaxAllowedPercent(containerWidthPx);
-    const next = Math.max(MIN_WIDTH_PERCENT, Math.min(maxAllowed, livePercent + delta));
+  const handleWidthStep = (delta: number) => {
+    const next = Math.max(
+      MIN_WIDTH_PERCENT,
+      Math.min(MAX_WIDTH_PERCENT, livePercent + delta),
+    );
     setLivePercent(next);
     if (next !== item.displayWidth) {
-      onResizeCommit(item.id, next);
+      onResizeCommit(item.id, { displayWidth: next });
     }
   };
 
   const handleReset = () => {
     const fallback = getDefaultWidthPercent(item);
     setLivePercent(fallback);
-    if (item.displayWidth !== null) {
-      onResizeCommit(item.id, null);
+    setLiveHeight(null);
+    if (item.displayWidth !== null || item.displayHeight !== null) {
+      onResizeCommit(item.id, { displayWidth: null, displayHeight: null });
     }
   };
 
+  const hasCustomLayout =
+    item.displayWidth !== null || item.displayHeight !== null;
+
   const itemStyle = {
     '--item-w': `${livePercent}%`,
-    maxWidth:
-      naturalSize && naturalSize.w >= 240 ? `${naturalSize.w}px` : undefined,
   } as CSSProperties;
+
+  const frameStyle: CSSProperties | undefined =
+    liveHeight !== null ? { height: `${liveHeight}px` } : undefined;
+
+  const mediaSizeClass =
+    liveHeight !== null ? 'w-full h-full object-cover' : 'w-full h-auto';
 
   return (
     <article
       style={itemStyle}
-      className={`w-full sm:w-[var(--item-w)] shrink-0 ${
+      className={`${
+        isEditMode ? 'w-[var(--item-w)]' : 'w-full sm:w-[var(--item-w)]'
+      } max-w-full shrink-0 ${
         isDragging ? 'select-none' : 'transition-[width] duration-150'
       }`}
     >
@@ -160,8 +222,9 @@ export function ResizablePortfolioItem({
           isEditMode ? 'outline-1 outline-dashed outline-[#1A3AFF] outline-offset-4' : ''
         }`}
       >
-        {/* Media Frame — strictly preserves natural aspect ratio (w-full h-auto) and native resolution */}
         <div
+          ref={frameRef}
+          style={frameStyle}
           role={isEditMode ? undefined : 'button'}
           tabIndex={isEditMode ? undefined : 0}
           onClick={() => {
@@ -184,18 +247,12 @@ export function ResizablePortfolioItem({
               src={item.mediaUrl}
               muted
               playsInline
-              onLoadedMetadata={(e) => {
-                const video = e.currentTarget;
-                if (video.videoWidth > 0 && video.videoHeight > 0) {
-                  setNaturalSize({ w: video.videoWidth, h: video.videoHeight });
-                }
-              }}
-              className={`block w-full h-auto ${
+              className={`block ${mediaSizeClass} ${
                 !isEditMode ? 'transition-opacity duration-150 group-hover:opacity-90' : ''
               }`}
             />
           ) : loadFailed ? (
-            <div className="aspect-[4/3] w-full flex items-center justify-center font-mono text-xs text-[#666662]">
+            <div className="aspect-[4/3] w-full h-full flex items-center justify-center font-mono text-xs text-[#666662]">
               {item.title || formatItemIndex(index)}
             </div>
           ) : (
@@ -203,14 +260,8 @@ export function ResizablePortfolioItem({
               src={item.mediaUrl}
               alt={item.title || `Item ${formatItemIndex(index)}`}
               loading="lazy"
-              onLoad={(e) => {
-                const img = e.currentTarget;
-                if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                  setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
-                }
-              }}
               onError={() => setLoadFailed(true)}
-              className={`block w-full h-auto ${
+              className={`block ${mediaSizeClass} ${
                 !isEditMode ? 'transition-opacity duration-150 group-hover:opacity-90' : ''
               }`}
             />
@@ -223,34 +274,54 @@ export function ResizablePortfolioItem({
             </span>
           )}
 
-          {/* Edit Mode Overlay Controls (visible ONLY when admin clicked editar) */}
+          {/* Free Edit Mode Controls (visible ONLY when admin clicked editar) */}
           {isEditMode && (
             <>
-              <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-2 pointer-events-none">
-                <span className="px-2 py-1 font-mono text-[11px] bg-[#0A0A09]/85 text-[#F7F7F5] tabular-nums">
-                  {livePercent}%
-                  {naturalSize ? ` · ${naturalSize.w}×${naturalSize.h}` : ''}
-                  {isSaving ? ' · salvando' : ''}
-                </span>
+              <div className="absolute top-2 left-2 right-2 z-10 flex flex-wrap items-center justify-between gap-1.5 pointer-events-none">
+                <div className="flex items-center bg-[#0A0A09]/85 text-[#F7F7F5] pointer-events-auto">
+                  <button
+                    type="button"
+                    disabled={!canMovePrev}
+                    onClick={() => onMove(-1)}
+                    aria-label="Mover para antes"
+                    className="p-1.5 hover:bg-[#1A3AFF] disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-default"
+                  >
+                    <ArrowLeft className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canMoveNext}
+                    onClick={() => onMove(1)}
+                    aria-label="Mover para depois"
+                    className="p-1.5 border-r border-white/15 hover:bg-[#1A3AFF] disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-default"
+                  >
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                  <span className="px-2 py-1 font-mono text-[11px] tabular-nums">
+                    {livePercent}%
+                    {liveHeight !== null ? ` × ${liveHeight}px` : ''}
+                    {isSaving ? ' · salvando' : ''}
+                  </span>
+                </div>
 
                 <div className="flex items-center bg-[#0A0A09]/85 text-[#F7F7F5] pointer-events-auto">
                   <button
                     type="button"
-                    onClick={() => handleStep(-6)}
-                    aria-label="Diminuir tamanho"
+                    onClick={() => handleWidthStep(-5)}
+                    aria-label="Diminuir largura"
                     className="p-1.5 hover:bg-[#1A3AFF] transition-colors cursor-pointer"
                   >
                     <Minus className="w-3 h-3" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleStep(6)}
-                    aria-label="Aumentar tamanho"
+                    onClick={() => handleWidthStep(5)}
+                    aria-label="Aumentar largura"
                     className="p-1.5 hover:bg-[#1A3AFF] transition-colors cursor-pointer"
                   >
                     <Plus className="w-3 h-3" />
                   </button>
-                  {item.displayWidth !== null && (
+                  {hasCustomLayout && (
                     <button
                       type="button"
                       onClick={handleReset}
@@ -263,14 +334,41 @@ export function ResizablePortfolioItem({
                 </div>
               </div>
 
+              {/* Right edge handle — free width resize (10% to 100%) */}
               <button
                 type="button"
-                aria-label="Arrastar para redimensionar respeitando a resolução"
-                onPointerDown={handleResizePointerDown}
+                aria-label="Arrastar borda direita para ajustar largura"
+                onPointerDown={(e) => startResizeDrag('x', e)}
                 onPointerMove={handleResizePointerMove}
                 onPointerUp={handleResizePointerUp}
                 onPointerCancel={handleResizePointerUp}
-                className="absolute bottom-0 right-0 w-7 h-7 bg-[#1A3AFF] text-[#F7F7F5] flex items-center justify-center cursor-nwse-resize touch-none hover:bg-[#111111] transition-colors"
+                className="group/edge absolute top-10 bottom-7 right-0 z-10 w-3 flex items-center justify-end cursor-ew-resize touch-none"
+              >
+                <span className="w-1 h-10 bg-[#1A3AFF]/80 group-hover/edge:bg-[#1A3AFF] group-hover/edge:w-1.5 transition-all" />
+              </button>
+
+              {/* Bottom edge handle — free height resize (100px to 1200px) */}
+              <button
+                type="button"
+                aria-label="Arrastar borda inferior para ajustar altura"
+                onPointerDown={(e) => startResizeDrag('y', e)}
+                onPointerMove={handleResizePointerMove}
+                onPointerUp={handleResizePointerUp}
+                onPointerCancel={handleResizePointerUp}
+                className="group/edge absolute bottom-0 left-0 right-7 z-10 h-3 flex items-end justify-center cursor-ns-resize touch-none"
+              >
+                <span className="h-1 w-10 bg-[#1A3AFF]/80 group-hover/edge:bg-[#1A3AFF] group-hover/edge:h-1.5 transition-all" />
+              </button>
+
+              {/* Bottom-right corner handle — free 2D width + height resize */}
+              <button
+                type="button"
+                aria-label="Arrastar canto para redimensionar largura e altura livremente"
+                onPointerDown={(e) => startResizeDrag('xy', e)}
+                onPointerMove={handleResizePointerMove}
+                onPointerUp={handleResizePointerUp}
+                onPointerCancel={handleResizePointerUp}
+                className="absolute bottom-0 right-0 z-20 w-7 h-7 bg-[#1A3AFF] text-[#F7F7F5] flex items-center justify-center cursor-nwse-resize touch-none hover:bg-[#111111] transition-colors"
               >
                 <MoveDiagonal2 className="w-3.5 h-3.5" aria-hidden="true" />
               </button>

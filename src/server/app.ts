@@ -246,7 +246,9 @@ export function createApiApp(): Express {
 
   // Standalone Admin Auth: restore active persistent session (silent, returns authenticated boolean)
   app.get('/api/admin/auth/me', async (req: Request, res: Response) => {
-    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Vary', 'Cookie, Authorization');
     if (!isDatabaseConfigured()) {
       res.json({ authenticated: false });
       return;
@@ -574,6 +576,7 @@ export function createApiApp(): Express {
         aspect?: 'portrait' | 'landscape' | 'square';
         published?: boolean;
         displayWidth?: number | null;
+        displayHeight?: number | null;
       } = {};
 
       if (typeof req.body.title === 'string') {
@@ -595,7 +598,15 @@ export function createApiApp(): Express {
         typeof req.body.displayWidth === 'number' &&
         Number.isFinite(req.body.displayWidth)
       ) {
-        updates.displayWidth = Math.max(15, Math.min(100, Math.round(req.body.displayWidth)));
+        updates.displayWidth = Math.max(10, Math.min(100, Math.round(req.body.displayWidth)));
+      }
+      if (req.body.displayHeight === null) {
+        updates.displayHeight = null;
+      } else if (
+        typeof req.body.displayHeight === 'number' &&
+        Number.isFinite(req.body.displayHeight)
+      ) {
+        updates.displayHeight = Math.max(100, Math.min(1200, Math.round(req.body.displayHeight)));
       }
 
       if (Object.keys(updates).length === 0) {

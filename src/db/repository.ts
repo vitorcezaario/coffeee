@@ -17,6 +17,7 @@ export interface PortfolioItemSummary {
   mimeType: string;
   duration: string | null;
   displayWidth: number | null;
+  displayHeight: number | null;
   sortOrder: number;
   published: boolean;
   createdAt: string;
@@ -209,16 +210,15 @@ export async function updateAdminCredentials(
 export async function createAdminSession(
   userId: number,
   tokenHash: string,
-  ttlHours = 24,
+  ttlHours = 720,
 ): Promise<void> {
   try {
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + ttlHours * 60 * 60 * 1000);
-    await db.delete(adminSessions).where(lt(adminSessions.expiresAt, now));
+    const safeHours = Math.max(1, Math.min(24 * 90, Math.trunc(ttlHours)));
+    await db.delete(adminSessions).where(lt(adminSessions.expiresAt, sql`now()`));
     await db.insert(adminSessions).values({
       userId,
       tokenHash,
-      expiresAt,
+      expiresAt: sql`now() + (${safeHours} * interval '1 hour')`,
     });
   } catch (error) {
     console.error('Failed to create admin session:', error);
@@ -233,7 +233,6 @@ export async function findValidAdminSession(
   user: { id: number; username: string; email: string; role: string };
 } | null> {
   try {
-    const now = new Date();
     const rows = await db
       .select({
         sessionId: adminSessions.id,
@@ -247,7 +246,7 @@ export async function findValidAdminSession(
       .where(
         and(
           eq(adminSessions.tokenHash, tokenHash),
-          gt(adminSessions.expiresAt, now),
+          gt(adminSessions.expiresAt, sql`now()`),
           eq(users.role, 'admin'),
         ),
       )
@@ -385,6 +384,7 @@ export async function listPortfolioItems(includeDrafts: boolean): Promise<Portfo
         mimeType: portfolioItems.mimeType,
         duration: portfolioItems.duration,
         displayWidth: portfolioItems.displayWidth,
+        displayHeight: portfolioItems.displayHeight,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -408,6 +408,7 @@ export async function listPortfolioItems(includeDrafts: boolean): Promise<Portfo
       mimeType: row.mimeType,
       duration: row.duration,
       displayWidth: row.displayWidth ?? null,
+      displayHeight: row.displayHeight ?? null,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),
@@ -476,6 +477,7 @@ export async function createPortfolioItem(params: {
         mimeType: portfolioItems.mimeType,
         duration: portfolioItems.duration,
         displayWidth: portfolioItems.displayWidth,
+        displayHeight: portfolioItems.displayHeight,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -493,6 +495,7 @@ export async function createPortfolioItem(params: {
       mimeType: row.mimeType,
       duration: row.duration,
       displayWidth: row.displayWidth ?? null,
+      displayHeight: row.displayHeight ?? null,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),
@@ -511,6 +514,7 @@ export async function updatePortfolioItem(
     aspect?: 'portrait' | 'landscape' | 'square';
     published?: boolean;
     displayWidth?: number | null;
+    displayHeight?: number | null;
     sortOrder?: number;
   },
 ): Promise<PortfolioItemSummary | null> {
@@ -531,7 +535,15 @@ export async function updatePortfolioItem(
       typeof updates.displayWidth === 'number' &&
       Number.isFinite(updates.displayWidth)
     ) {
-      setPayload.displayWidth = Math.max(15, Math.min(100, Math.round(updates.displayWidth)));
+      setPayload.displayWidth = Math.max(10, Math.min(100, Math.round(updates.displayWidth)));
+    }
+    if (updates.displayHeight === null) {
+      setPayload.displayHeight = null;
+    } else if (
+      typeof updates.displayHeight === 'number' &&
+      Number.isFinite(updates.displayHeight)
+    ) {
+      setPayload.displayHeight = Math.max(100, Math.min(1200, Math.round(updates.displayHeight)));
     }
     if (typeof updates.sortOrder === 'number' && Number.isFinite(updates.sortOrder)) {
       setPayload.sortOrder = Math.trunc(updates.sortOrder);
@@ -549,6 +561,7 @@ export async function updatePortfolioItem(
         mimeType: portfolioItems.mimeType,
         duration: portfolioItems.duration,
         displayWidth: portfolioItems.displayWidth,
+        displayHeight: portfolioItems.displayHeight,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -567,6 +580,7 @@ export async function updatePortfolioItem(
       mimeType: row.mimeType,
       duration: row.duration,
       displayWidth: row.displayWidth ?? null,
+      displayHeight: row.displayHeight ?? null,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),
