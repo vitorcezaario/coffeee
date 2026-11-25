@@ -89,11 +89,8 @@ export function verifyCsrfRequest(req: Request): boolean {
     }
   }
 
-  // If Origin is present, it must match our host; otherwise require the custom header
-  if (typeof originHeader === 'string') {
-    return originMatches && hasCustomHeader;
-  }
-  return hasCustomHeader;
+  // Accept either our custom header (blocks cross-site form/CORS CSRF) or a matching Origin
+  return hasCustomHeader || originMatches;
 }
 
 export async function verifyAdminRequest(req: Request) {

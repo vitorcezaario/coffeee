@@ -15,10 +15,11 @@ import {
 } from './data/archive';
 
 function isAdminRoute(pathname: string, hash: string): boolean {
-  const cleanHash = hash.replace(/^#/, '');
+  const cleanPath = pathname.trim().toLowerCase();
+  const cleanHash = hash.replace(/^#/, '').trim().toLowerCase();
   return (
-    pathname === '/admin' ||
-    pathname.startsWith('/admin/') ||
+    cleanPath === '/admin' ||
+    cleanPath.startsWith('/admin/') ||
     cleanHash === '/admin' ||
     cleanHash === 'admin' ||
     cleanHash.startsWith('/admin/')
@@ -102,10 +103,17 @@ export default function App() {
     };
   }, []);
 
-  const fetchPortfolio = useCallback(async () => {
+  const fetchPortfolio = useCallback(async (attempt = 0) => {
     try {
-      const res = await fetch('/api/portfolio');
-      if (!res.ok) return;
+      const res = await fetch('/api/portfolio', { cache: 'no-store' });
+      if (!res.ok) {
+        if (attempt < 2) {
+          window.setTimeout(() => fetchPortfolio(attempt + 1), 1500);
+          return;
+        }
+        setLoadingPortfolio(false);
+        return;
+      }
       const data = await res.json();
       if (data.settings) {
         setSettings(data.settings);
@@ -113,9 +121,12 @@ export default function App() {
       if (Array.isArray(data.items)) {
         setItems(data.items);
       }
+      setLoadingPortfolio(false);
     } catch {
-      // Keep current state silently on transient network error
-    } finally {
+      if (attempt < 2) {
+        window.setTimeout(() => fetchPortfolio(attempt + 1), 1500);
+        return;
+      }
       setLoadingPortfolio(false);
     }
   }, []);

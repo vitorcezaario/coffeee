@@ -55,7 +55,7 @@ export const createPool = () => {
         connectionString: externalUrl,
         ssl: isLocal ? undefined : { rejectUnauthorized: false },
         max: 5,
-        connectionTimeoutMillis: 15000,
+        connectionTimeoutMillis: 25000,
       });
     } else {
       // AI Studio Cloud SQL Object Method fallback
