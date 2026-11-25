@@ -122,10 +122,12 @@ export async function ensureExternalSchema(): Promise<void> {
           "mime_type" text NOT NULL,
           "file_data" text NOT NULL,
           "duration" text,
+          "display_width" integer,
           "sort_order" integer DEFAULT 0 NOT NULL,
           "published" boolean DEFAULT true NOT NULL,
           "created_at" timestamp DEFAULT now() NOT NULL
         );
+        ALTER TABLE "portfolio_items" ADD COLUMN IF NOT EXISTS "display_width" integer;
       `);
     })().catch((err) => {
       global._externalSchemaReady = undefined;

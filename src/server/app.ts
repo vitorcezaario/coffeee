@@ -573,6 +573,7 @@ export function createApiApp(): Express {
         title?: string;
         aspect?: 'portrait' | 'landscape' | 'square';
         published?: boolean;
+        displayWidth?: number | null;
       } = {};
 
       if (typeof req.body.title === 'string') {
@@ -587,6 +588,14 @@ export function createApiApp(): Express {
       }
       if (typeof req.body.published === 'boolean') {
         updates.published = req.body.published;
+      }
+      if (req.body.displayWidth === null) {
+        updates.displayWidth = null;
+      } else if (
+        typeof req.body.displayWidth === 'number' &&
+        Number.isFinite(req.body.displayWidth)
+      ) {
+        updates.displayWidth = Math.max(15, Math.min(100, Math.round(req.body.displayWidth)));
       }
 
       if (Object.keys(updates).length === 0) {

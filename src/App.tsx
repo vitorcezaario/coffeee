@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
-import { Play } from 'lucide-react';
 import { Header, PublicLayoutMode } from './components/Header';
 import { LoadingScreen } from './components/LoadingScreen';
 import { MediaLightbox } from './components/MediaLightbox';
 import { SafeImage } from './components/SafeImage';
 import { AdminPanel, AdminSessionState } from './components/AdminPanel';
+import { ResizablePortfolioItem } from './components/ResizablePortfolioItem';
 import {
   DEFAULT_SITE_SETTINGS,
   formatItemDate,
@@ -40,6 +40,9 @@ export default function App() {
   const [adminSession, setAdminSession] = useState<AdminSessionState | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [layoutMode, setLayoutMode] = useState<PublicLayoutMode>('folha');
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [savingItemId, setSavingItemId] = useState<number | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
@@ -47,6 +50,7 @@ export default function App() {
 
   const [selectedItem, setSelectedItem] = useState<PortfolioItem | null>(null);
   const [hoveredIndexItem, setHoveredIndexItem] = useState<PortfolioItem | null>(null);
+  const galleryRef = useRef<HTMLDivElement | null>(null);
 
   const handleLoadingComplete = useCallback(() => {
     setIsLoading(false);
@@ -156,9 +160,84 @@ export default function App() {
     } catch {
       // Ignore network error during logout
     } finally {
+      setIsEditMode(false);
       setAdminSession(null);
     }
   }, [adminSession?.token]);
+
+  const handleToggleEditMode = useCallback(() => {
+    setEditError(null);
+    setIsEditMode((prev) => {
+      const next = !prev;
+      if (next && layoutMode !== 'folha') {
+        setLayoutMode('folha');
+      }
+      return next;
+    });
+  }, [layoutMode]);
+
+  const handleSelectPublicLayout = useCallback((mode: PublicLayoutMode) => {
+    setLayoutMode(mode);
+    if (mode !== 'folha') {
+      setIsEditMode(false);
+    }
+  }, []);
+
+  const handleResizeCommit = useCallback(
+    async (id: number, displayWidth: number | null) => {
+      if (!adminSession) return;
+      setEditError(null);
+      setSavingItemId(id);
+
+      // Optimistic update so the layout stays instant
+      setItems((prev) =>
+        prev.map((entry) =>
+          entry.id === id ? { ...entry, displayWidth } : entry,
+        ),
+      );
+
+      try {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'coffee-admin',
+        };
+        if (adminSession.token) {
+          headers.Authorization = `Bearer ${adminSession.token}`;
+        }
+
+        const res = await fetch(`/api/admin/items/${id}`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify({ displayWidth }),
+        });
+
+        if (res.status === 401) {
+          setIsEditMode(false);
+          setAdminSession(null);
+          return;
+        }
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Não foi possível salvar o tamanho.');
+        }
+
+        const updated = (await res.json()) as PortfolioItem;
+        setItems((prev) =>
+          prev.map((entry) => (entry.id === id ? updated : entry)),
+        );
+      } catch (err) {
+        setEditError(
+          err instanceof Error ? err.message : 'Erro ao salvar redimensionamento.',
+        );
+        fetchPortfolio();
+      } finally {
+        setSavingItemId(null);
+      }
+    },
+    [adminSession, fetchPortfolio],
+  );
 
   const handleNavigateHome = useCallback(() => {
     navigate('/');
@@ -192,10 +271,29 @@ export default function App() {
         publicLayoutMode={layoutMode}
         hasPublicItems={items.length > 0}
         itemCount={items.length}
-        onSelectPublicLayout={setLayoutMode}
+        canEdit={Boolean(adminSession)}
+        isEditMode={isEditMode}
+        onSelectPublicLayout={handleSelectPublicLayout}
+        onToggleEditMode={handleToggleEditMode}
       />
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-5 md:px-8">
+        {/* Subtle inline edit hint bar (visible ONLY while admin is in Edit Mode) */}
+        {isEditMode && adminSession && (
+          <div className="py-3 border-b border-[#DCDCD4] flex flex-wrap items-center justify-between gap-3 font-mono text-xs text-[#666662]">
+            <span>
+              arraste o canto inferior direito ou use <span className="text-[#111111]">− / +</span> para redimensionar respeitando a resolução
+            </span>
+            {editError ? (
+              <span className="text-[#B91C1C]">{editError}</span>
+            ) : savingItemId !== null ? (
+              <span className="text-[#1A3AFF]">salvando...</span>
+            ) : (
+              <span className="text-[#111111]">alterações salvas automaticamente</span>
+            )}
+          </div>
+        )}
+
         {/* Public Portfolio Canvas */}
         <section aria-label="Acervo" className="py-10 md:py-14">
           {loadingPortfolio ? (
@@ -209,71 +307,23 @@ export default function App() {
               </p>
             </div>
           ) : layoutMode === 'folha' ? (
-            /* Contact Sheet View */
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-12 items-end">
-              {items.map((item, idx) => {
-                const isWide = item.aspect === 'landscape';
-                const aspectClass =
-                  item.aspect === 'landscape'
-                    ? 'aspect-[16/10]'
-                    : item.aspect === 'square'
-                      ? 'aspect-square'
-                      : 'aspect-[3/4]';
-
-                return (
-                  <article
-                    key={item.id}
-                    className={isWide ? 'sm:col-span-2' : 'col-span-1'}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setSelectedItem(item)}
-                      className="group block w-full text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#1A3AFF]"
-                    >
-                      <div
-                        className={`relative w-full overflow-hidden bg-[#EAEAE4] transition-opacity duration-150 group-hover:opacity-90 ${aspectClass}`}
-                      >
-                        {item.kind === 'video' ? (
-                          <video
-                            src={item.mediaUrl}
-                            muted
-                            playsInline
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <SafeImage
-                            src={item.mediaUrl}
-                            alt={item.title || `Item ${formatItemIndex(idx)}`}
-                            fallbackLabel={item.title || formatItemIndex(idx)}
-                            className="w-full h-full object-cover"
-                          />
-                        )}
-
-                        {item.kind === 'video' && item.duration && (
-                          <span className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1.5 px-2 py-1 font-mono text-[11px] bg-[#0A0A09]/85 text-[#F7F7F5] border border-white/15 tabular-nums">
-                            <Play
-                              className="w-2.5 h-2.5 fill-current"
-                              aria-hidden="true"
-                            />
-                            <span>{item.duration}</span>
-                          </span>
-                        )}
-                      </div>
-
-                      {item.title && (
-                        <div className="mt-2.5 flex items-baseline justify-between gap-3 font-mono text-[11px]">
-                          <span className="text-[#111111] group-hover:text-[#1A3AFF] transition-colors truncate">
-                            {item.title}
-                          </span>
-                          <span className="text-[#666662] tabular-nums shrink-0">
-                            {formatItemDate(item.createdAt)}
-                          </span>
-                        </div>
-                      )}
-                    </button>
-                  </article>
-                );
-              })}
+            /* Contact Sheet View — True Resolution Proportions + Admin Inline Resize */
+            <div
+              ref={galleryRef}
+              className="flex flex-wrap items-end gap-x-6 gap-y-12"
+            >
+              {items.map((item, idx) => (
+                <ResizablePortfolioItem
+                  key={item.id}
+                  item={item}
+                  index={idx}
+                  isEditMode={isEditMode && Boolean(adminSession)}
+                  isSaving={savingItemId === item.id}
+                  containerRef={galleryRef}
+                  onSelect={setSelectedItem}
+                  onResizeCommit={handleResizeCommit}
+                />
+              ))}
             </div>
           ) : (
             /* Raw Text Directory Index with Side Hover Preview */
@@ -311,20 +361,20 @@ export default function App() {
                   if (!preview) return null;
                   return (
                     <div>
-                      <div className="overflow-hidden aspect-[4/3] bg-[#EAEAE4]">
+                      <div className="overflow-hidden bg-[#EAEAE4]">
                         {preview.kind === 'video' ? (
                           <video
                             src={preview.mediaUrl}
                             muted
                             playsInline
-                            className="w-full h-full object-cover"
+                            className="block w-full h-auto"
                           />
                         ) : (
                           <SafeImage
                             src={preview.mediaUrl}
                             alt={preview.title || `Item ${preview.id}`}
                             fallbackLabel={preview.title || String(preview.id)}
-                            className="w-full h-full object-cover"
+                            className="block w-full h-auto"
                           />
                         )}
                       </div>

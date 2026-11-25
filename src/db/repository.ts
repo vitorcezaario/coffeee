@@ -16,6 +16,7 @@ export interface PortfolioItemSummary {
   aspect: 'portrait' | 'landscape' | 'square';
   mimeType: string;
   duration: string | null;
+  displayWidth: number | null;
   sortOrder: number;
   published: boolean;
   createdAt: string;
@@ -383,6 +384,7 @@ export async function listPortfolioItems(includeDrafts: boolean): Promise<Portfo
         aspect: portfolioItems.aspect,
         mimeType: portfolioItems.mimeType,
         duration: portfolioItems.duration,
+        displayWidth: portfolioItems.displayWidth,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -405,6 +407,7 @@ export async function listPortfolioItems(includeDrafts: boolean): Promise<Portfo
           : 'portrait',
       mimeType: row.mimeType,
       duration: row.duration,
+      displayWidth: row.displayWidth ?? null,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),
@@ -472,6 +475,7 @@ export async function createPortfolioItem(params: {
         aspect: portfolioItems.aspect,
         mimeType: portfolioItems.mimeType,
         duration: portfolioItems.duration,
+        displayWidth: portfolioItems.displayWidth,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -488,6 +492,7 @@ export async function createPortfolioItem(params: {
           : 'portrait',
       mimeType: row.mimeType,
       duration: row.duration,
+      displayWidth: row.displayWidth ?? null,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),
@@ -505,6 +510,7 @@ export async function updatePortfolioItem(
     title?: string;
     aspect?: 'portrait' | 'landscape' | 'square';
     published?: boolean;
+    displayWidth?: number | null;
     sortOrder?: number;
   },
 ): Promise<PortfolioItemSummary | null> {
@@ -519,6 +525,14 @@ export async function updatePortfolioItem(
       setPayload.aspect = updates.aspect;
     }
     if (typeof updates.published === 'boolean') setPayload.published = updates.published;
+    if (updates.displayWidth === null) {
+      setPayload.displayWidth = null;
+    } else if (
+      typeof updates.displayWidth === 'number' &&
+      Number.isFinite(updates.displayWidth)
+    ) {
+      setPayload.displayWidth = Math.max(15, Math.min(100, Math.round(updates.displayWidth)));
+    }
     if (typeof updates.sortOrder === 'number' && Number.isFinite(updates.sortOrder)) {
       setPayload.sortOrder = Math.trunc(updates.sortOrder);
     }
@@ -534,6 +548,7 @@ export async function updatePortfolioItem(
         aspect: portfolioItems.aspect,
         mimeType: portfolioItems.mimeType,
         duration: portfolioItems.duration,
+        displayWidth: portfolioItems.displayWidth,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -551,6 +566,7 @@ export async function updatePortfolioItem(
           : 'portrait',
       mimeType: row.mimeType,
       duration: row.duration,
+      displayWidth: row.displayWidth ?? null,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),

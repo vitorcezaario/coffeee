@@ -5,7 +5,10 @@ interface HeaderProps {
   publicLayoutMode: PublicLayoutMode;
   hasPublicItems: boolean;
   itemCount: number;
+  canEdit: boolean;
+  isEditMode: boolean;
   onSelectPublicLayout: (mode: PublicLayoutMode) => void;
+  onToggleEditMode: () => void;
 }
 
 export function Header({
@@ -13,7 +16,10 @@ export function Header({
   publicLayoutMode,
   hasPublicItems,
   itemCount,
+  canEdit,
+  isEditMode,
   onSelectPublicLayout,
+  onToggleEditMode,
 }: HeaderProps) {
   const handleLogoClick = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -61,9 +67,25 @@ export function Header({
           <div aria-hidden="true" />
         )}
 
-        {/* Zone 3: Quiet item counter (zero admin link on public home) */}
-        <div className="shrink-0 font-mono text-xs text-[#666662] tabular-nums whitespace-nowrap">
-          {String(itemCount).padStart(2, '0')} {itemCount === 1 ? 'item' : 'itens'}
+        {/* Zone 3: Top-right edit button (visible ONLY to logged-in admin), otherwise discreet item count */}
+        <div className="shrink-0 flex items-center gap-4">
+          {canEdit && hasPublicItems ? (
+            <button
+              type="button"
+              onClick={onToggleEditMode}
+              className={`px-3.5 py-2 font-mono text-xs transition-colors duration-150 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1A3AFF] ${
+                isEditMode
+                  ? 'bg-[#1A3AFF] text-[#F7F7F5] hover:bg-[#111111]'
+                  : 'bg-[#111111] text-[#F7F7F5] hover:bg-[#1A3AFF]'
+              }`}
+            >
+              {isEditMode ? 'concluir' : 'editar'}
+            </button>
+          ) : (
+            <span className="font-mono text-xs text-[#666662] tabular-nums whitespace-nowrap">
+              {String(itemCount).padStart(2, '0')} {itemCount === 1 ? 'item' : 'itens'}
+            </span>
+          )}
         </div>
       </div>
     </header>

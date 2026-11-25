@@ -54,6 +54,7 @@ export const portfolioItems = pgTable('portfolio_items', {
   mimeType: text('mime_type').notNull(),
   fileData: text('file_data').notNull(), // base64 stored in PostgreSQL for durability
   duration: text('duration'),
+  displayWidth: integer('display_width'),
   sortOrder: integer('sort_order').notNull().default(0),
   published: boolean('published').notNull().default(true),
   createdAt: timestamp('created_at').defaultNow().notNull(),

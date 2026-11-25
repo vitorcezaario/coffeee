@@ -8,6 +8,7 @@ export interface PortfolioItem {
   aspect: MediaAspect;
   mimeType: string;
   duration: string | null;
+  displayWidth: number | null;
   sortOrder: number;
   published: boolean;
   createdAt: string;
