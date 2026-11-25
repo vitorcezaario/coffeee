@@ -37,6 +37,7 @@ export default function App() {
     () => !isAdminRoute(window.location.pathname, window.location.hash),
   );
   const [adminSession, setAdminSession] = useState<AdminSessionState | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [layoutMode, setLayoutMode] = useState<PublicLayoutMode>('folha');
 
   const [items, setItems] = useState<PortfolioItem[]>([]);
@@ -73,6 +74,34 @@ export default function App() {
     };
   }, []);
 
+  // Silently restore persistent admin session via HttpOnly cookie on initial load
+  useEffect(() => {
+    let cancelled = false;
+    const restoreSession = async () => {
+      try {
+        const res = await fetch('/api/admin/auth/me', {
+          credentials: 'include',
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.authenticated) {
+          setAdminSession({
+            username: data.username || 'admin',
+            envPasscodeActive: Boolean(data.envPasscodeActive),
+          });
+        }
+      } catch {
+        // Ignore transient network errors during silent session check
+      } finally {
+        if (!cancelled) setSessionChecked(true);
+      }
+    };
+    restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const fetchPortfolio = useCallback(async () => {
     try {
       const res = await fetch('/api/portfolio');
@@ -100,6 +129,26 @@ export default function App() {
     document.title = onAdminPage ? `${baseName} / admin` : baseName;
   }, [onAdminPage, settings.siteName]);
 
+  const handleLogout = useCallback(async () => {
+    try {
+      const headers: Record<string, string> = {
+        'X-Requested-With': 'coffee-admin',
+      };
+      if (adminSession?.token) {
+        headers.Authorization = `Bearer ${adminSession.token}`;
+      }
+      await fetch('/api/admin/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+      });
+    } catch {
+      // Ignore network error during logout
+    } finally {
+      setAdminSession(null);
+    }
+  }, [adminSession?.token]);
+
   const handleNavigateHome = useCallback(() => {
     navigate('/');
     fetchPortfolio();
@@ -111,7 +160,9 @@ export default function App() {
       <AdminPanel
         siteName={settings.siteName}
         session={adminSession}
+        sessionChecked={sessionChecked}
         onSessionChange={setAdminSession}
+        onLogout={handleLogout}
         onNavigateHome={handleNavigateHome}
         onContentChanged={fetchPortfolio}
       />
@@ -279,7 +330,7 @@ export default function App() {
           )}
         </section>
 
-        {/* Minimal Raw Footer */}
+        {/* Minimal Raw Footer — Discreet admin shortcuts appear ONLY when already logged in */}
         <footer className="border-t border-[#DCDCD4] py-10 grid grid-cols-1 md:grid-cols-12 gap-6 text-xs font-mono text-[#666662]">
           <div className="md:col-span-6 space-y-1.5">
             <p className="text-[#111111]">{settings.siteName}</p>
@@ -296,7 +347,30 @@ export default function App() {
                 {settings.contactEmail}
               </a>
             )}
-            <span>{settings.footerCredit}</span>
+            <div className="flex flex-wrap items-center md:justify-end gap-4">
+              <span>{settings.footerCredit}</span>
+              {adminSession && (
+                <>
+                  <span aria-hidden="true" className="text-[#DCDCD4]">
+                    ·
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/admin')}
+                    className="text-[#666662] hover:text-[#111111] transition-colors cursor-pointer"
+                  >
+                    painel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="text-[#666662] hover:text-[#111111] transition-colors cursor-pointer"
+                  >
+                    sair
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </footer>
       </main>

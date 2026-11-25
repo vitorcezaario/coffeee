@@ -30,7 +30,14 @@ import {
   timingSafeStringEqual,
   verifyPassword,
 } from '../lib/admin-auth.ts';
-import { requireAdmin, verifyAdminHeader } from '../middleware/auth.ts';
+import {
+  clearSessionCookie,
+  requireAdmin,
+  SESSION_TTL_HOURS,
+  setSessionCookie,
+  verifyAdminRequest,
+  verifyCsrfRequest,
+} from '../middleware/auth.ts';
 import type { AuthRequest } from '../middleware/auth.ts';
 
 const ALLOWED_IMAGE_MIMES = new Set([
@@ -158,7 +165,7 @@ export function createApiApp(): Express {
       }
 
       if (!fileRecord.published) {
-        const verified = await verifyAdminHeader(req.headers.authorization);
+        const verified = await verifyAdminRequest(req);
         if (!verified) {
           res.status(404).end();
           return;
@@ -218,7 +225,7 @@ export function createApiApp(): Express {
     if (!isDatabaseConfigured()) {
       res.status(503).json({
         error:
-          'Banco de dados PostgreSQL não configurado no servidor. Defina DATABASE_URL nas variáveis de ambiente da Vercel.',
+          'Banco de dados PostgreSQL não configurado no servidor. Defina DATABASE_URL nas variáveis de ambiente.',
       });
       return;
     }
@@ -237,8 +244,37 @@ export function createApiApp(): Express {
     }
   });
 
+  // Standalone Admin Auth: restore active persistent session (silent, returns authenticated boolean)
+  app.get('/api/admin/auth/me', async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (!isDatabaseConfigured()) {
+      res.json({ authenticated: false });
+      return;
+    }
+
+    try {
+      const verified = await verifyAdminRequest(req);
+      if (!verified) {
+        res.json({ authenticated: false });
+        return;
+      }
+      res.json({
+        authenticated: true,
+        username: verified.user.username,
+        envPasscodeActive: getEnvAdminPasscode().length > 0,
+      });
+    } catch {
+      res.json({ authenticated: false });
+    }
+  });
+
   // Standalone Admin Auth: one-time first-run claim (locked once claimed or when ADMIN_PASSCODE env is set)
   app.post('/api/admin/auth/setup', async (req: Request, res: Response) => {
+    if (!verifyCsrfRequest(req)) {
+      res.status(403).json({ error: 'Requisição bloqueada por validação de origem.' });
+      return;
+    }
+
     if (!isDatabaseConfigured()) {
       res.status(503).json({
         error: 'Banco de dados PostgreSQL não configurado no servidor.',
@@ -283,7 +319,8 @@ export function createApiApp(): Express {
       }
 
       const { rawToken, tokenHash } = generateSessionToken();
-      await createAdminSession(claimedUser.id, tokenHash);
+      await createAdminSession(claimedUser.id, tokenHash, SESSION_TTL_HOURS);
+      setSessionCookie(res, rawToken);
       clearAuthRateLimit(req);
 
       res.status(201).json({
@@ -299,6 +336,11 @@ export function createApiApp(): Express {
 
   // Standalone Admin Auth: login with username & password
   app.post('/api/admin/auth/login', async (req: Request, res: Response) => {
+    if (!verifyCsrfRequest(req)) {
+      res.status(403).json({ error: 'Requisição bloqueada por validação de origem.' });
+      return;
+    }
+
     if (!isDatabaseConfigured()) {
       res.status(503).json({
         error: 'Banco de dados PostgreSQL não configurado no servidor.',
@@ -335,7 +377,8 @@ export function createApiApp(): Express {
 
         const adminUser = await ensureEnvAdminUser(expectedUser);
         const { rawToken, tokenHash } = generateSessionToken();
-        await createAdminSession(adminUser.id, tokenHash);
+        await createAdminSession(adminUser.id, tokenHash, SESSION_TTL_HOURS);
+        setSessionCookie(res, rawToken);
         clearAuthRateLimit(req);
 
         res.json({
@@ -360,7 +403,8 @@ export function createApiApp(): Express {
       }
 
       const { rawToken, tokenHash } = generateSessionToken();
-      await createAdminSession(account.id, tokenHash);
+      await createAdminSession(account.id, tokenHash, SESSION_TTL_HOURS);
+      setSessionCookie(res, rawToken);
       clearAuthRateLimit(req);
 
       res.json({
@@ -374,19 +418,23 @@ export function createApiApp(): Express {
     }
   });
 
-  // Standalone Admin Auth: verify current session
-  app.get('/api/admin/auth/me', requireAdmin, (req: AuthRequest, res: Response) => {
-    res.json({
-      username: req.adminUser?.username || 'admin',
-      envPasscodeActive: getEnvAdminPasscode().length > 0,
-    });
-  });
-
-  // Standalone Admin Auth: logout
-  app.post('/api/admin/auth/logout', requireAdmin, async (req: AuthRequest, res: Response) => {
-    if (req.sessionTokenHash) {
-      await deleteAdminSession(req.sessionTokenHash);
+  // Standalone Admin Auth: logout (revokes session in PostgreSQL & clears HttpOnly cookie)
+  app.post('/api/admin/auth/logout', async (req: Request, res: Response) => {
+    if (!verifyCsrfRequest(req)) {
+      res.status(403).json({ error: 'Requisição bloqueada por validação de origem.' });
+      return;
     }
+
+    try {
+      const verified = await verifyAdminRequest(req);
+      if (verified?.tokenHash) {
+        await deleteAdminSession(verified.tokenHash);
+      }
+    } catch (error) {
+      console.error('Logout session cleanup error:', error);
+    }
+
+    clearSessionCookie(res);
     res.json({ ok: true });
   });
 

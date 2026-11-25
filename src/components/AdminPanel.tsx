@@ -32,15 +32,17 @@ import { MediaLightbox } from './MediaLightbox';
 export type AdminSection = 'acervo' | 'fluxo' | 'config';
 
 export interface AdminSessionState {
-  token: string;
   username: string;
   envPasscodeActive: boolean;
+  token?: string | null;
 }
 
 interface AdminPanelProps {
   siteName: string;
   session: AdminSessionState | null;
+  sessionChecked: boolean;
   onSessionChange: (session: AdminSessionState | null) => void;
+  onLogout: () => Promise<void>;
   onNavigateHome: () => void;
   onContentChanged: () => void;
 }
@@ -75,7 +77,9 @@ function guessAspectFromDimensions(width: number, height: number): MediaAspect {
 export function AdminPanel({
   siteName,
   session,
+  sessionChecked,
   onSessionChange,
+  onLogout,
   onNavigateHome,
   onContentChanged,
 }: AdminPanelProps) {
@@ -89,6 +93,7 @@ export function AdminPanel({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   // Portfolio & Settings State
   const [items, setItems] = useState<PortfolioItem[]>([]);
@@ -131,6 +136,20 @@ export function AdminPanel({
   // Admin Lightbox (for both acervo previews & fluxo tab)
   const [lightboxItem, setLightboxItem] = useState<PortfolioItem | null>(null);
 
+  const buildHeaders = useCallback(
+    (extra?: Record<string, string>): Record<string, string> => {
+      const headers: Record<string, string> = {
+        'X-Requested-With': 'coffee-admin',
+        ...(extra || {}),
+      };
+      if (session?.token) {
+        headers.Authorization = `Bearer ${session.token}`;
+      }
+      return headers;
+    },
+    [session?.token],
+  );
+
   const showTempFeedback = useCallback((message: string) => {
     setErrorMessage(null);
     setFeedback(message);
@@ -148,8 +167,9 @@ export function AdminPanel({
     }
   }, [session?.username]);
 
-  // Check whether first-run setup is required when unauthenticated
+  // Check whether first-run setup is required when unauthenticated (after session restoration completes)
   useEffect(() => {
+    if (!sessionChecked) return;
     if (session) {
       setCheckingStatus(false);
       return;
@@ -160,7 +180,9 @@ export function AdminPanel({
       setCheckingStatus(true);
       setAuthError(null);
       try {
-        const res = await fetch('/api/admin/auth/status');
+        const res = await fetch('/api/admin/auth/status', {
+          credentials: 'include',
+        });
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (res.ok) {
@@ -181,7 +203,7 @@ export function AdminPanel({
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, sessionChecked]);
 
   const handleUnauthorized = useCallback(() => {
     onSessionChange(null);
@@ -195,7 +217,8 @@ export function AdminPanel({
     setErrorMessage(null);
     try {
       const res = await fetch('/api/admin/overview', {
-        headers: { Authorization: `Bearer ${session.token}` },
+        credentials: 'include',
+        headers: buildHeaders(),
       });
       if (res.status === 401) {
         handleUnauthorized();
@@ -221,7 +244,7 @@ export function AdminPanel({
     } finally {
       setLoadingOverview(false);
     }
-  }, [handleUnauthorized, session]);
+  }, [buildHeaders, handleUnauthorized, session]);
 
   useEffect(() => {
     if (session) {
@@ -246,7 +269,8 @@ export function AdminPanel({
         const fetchedEntries: [number, string][] = [];
         for (const id of missingIds) {
           const res = await fetch(`/api/media/${id}/file`, {
-            headers: { Authorization: `Bearer ${session.token}` },
+            credentials: 'include',
+            headers: buildHeaders(),
           });
           if (!res.ok) continue;
           const blob = await res.blob();
@@ -274,7 +298,7 @@ export function AdminPanel({
     return () => {
       cancelled = true;
     };
-  }, [draftItemIds, session]);
+  }, [buildHeaders, draftItemIds, session]);
 
   // Cleanup blob URLs on unmount
   useEffect(() => {
@@ -312,7 +336,11 @@ export function AdminPanel({
 
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'coffee-admin',
+        },
         body: JSON.stringify({
           username: loginUsername.trim(),
           password: loginPassword,
@@ -338,19 +366,14 @@ export function AdminPanel({
     }
   };
 
-  const handleLogout = async () => {
-    if (session) {
-      try {
-        await fetch('/api/admin/auth/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${session.token}` },
-        });
-      } catch {
-        // Ignore network failure during logout
-      }
+  const handleLogoutClick = async () => {
+    setLoggingOut(true);
+    try {
+      await onLogout();
+      setItems([]);
+    } finally {
+      setLoggingOut(false);
     }
-    onSessionChange(null);
-    setItems([]);
   };
 
   const handleFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
@@ -427,7 +450,8 @@ export function AdminPanel({
 
       const res = await fetch('/api/admin/items', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${session.token}` },
+        credentials: 'include',
+        headers: buildHeaders(),
         body: formData,
       });
       if (res.status === 401) {
@@ -464,10 +488,8 @@ export function AdminPanel({
     try {
       const res = await fetch(`/api/admin/items/${id}`, {
         method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${session.token}`,
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(patch),
       });
       if (res.status === 401) {
@@ -508,10 +530,8 @@ export function AdminPanel({
     try {
       const res = await fetch('/api/admin/items/reorder', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.token}`,
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ orderedIds: nextItems.map((entry) => entry.id) }),
       });
       if (res.status === 401) {
@@ -539,7 +559,8 @@ export function AdminPanel({
     try {
       const res = await fetch(`/api/admin/items/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${session.token}` },
+        credentials: 'include',
+        headers: buildHeaders(),
       });
       if (res.status === 401) {
         handleUnauthorized();
@@ -577,10 +598,8 @@ export function AdminPanel({
     try {
       const res = await fetch('/api/admin/settings', {
         method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${session.token}`,
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(settingsForm),
       });
       if (res.status === 401) {
@@ -623,10 +642,8 @@ export function AdminPanel({
     try {
       const res = await fetch('/api/admin/auth/change-password', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.token}`,
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           username: nextUsername.trim(),
           currentPassword,
@@ -665,7 +682,7 @@ export function AdminPanel({
 
   return (
     <div className="min-h-screen bg-[#F7F7F5] text-[#111111] flex flex-col">
-      {/* Dedicated Standalone Admin Header */}
+      {/* Dedicated Discreet Standalone Admin Header */}
       <header className="sticky top-0 z-40 bg-[#F7F7F5] border-b border-[#DCDCD4]">
         <div className="max-w-[1440px] mx-auto px-5 md:px-8 h-14 flex items-center justify-between gap-8">
           <div className="flex items-baseline gap-2.5 whitespace-nowrap shrink-0">
@@ -705,7 +722,7 @@ export function AdminPanel({
             <div aria-hidden="true" />
           )}
 
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-3">
             <button
               type="button"
               onClick={onNavigateHome}
@@ -713,12 +730,23 @@ export function AdminPanel({
             >
               ver site
             </button>
+            {session && (
+              <button
+                type="button"
+                disabled={loggingOut}
+                onClick={handleLogoutClick}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 font-mono text-xs bg-[#111111] text-[#F7F7F5] hover:bg-[#1A3AFF] disabled:opacity-50 transition-colors duration-150 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>{loggingOut ? 'saindo...' : 'sair'}</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-5 md:px-8">
-        {checkingStatus ? (
+        {!sessionChecked || checkingStatus ? (
           <section className="py-24 max-w-md mx-auto text-center font-mono text-xs text-[#666662]">
             carregando painel...
           </section>
@@ -728,12 +756,12 @@ export function AdminPanel({
             <div className="border border-[#DCDCD4] bg-[#F7F7F5] p-8 space-y-6">
               <div className="space-y-2">
                 <h1 className="font-display text-2xl font-bold tracking-[-0.03em] text-[#111111]">
-                  {needsSetup ? 'criar acesso admin' : 'entrar no admin'}
+                  {needsSetup ? 'criar acesso' : 'entrar'}
                 </h1>
                 <p className="text-sm text-[#666662] leading-relaxed">
                   {needsSetup
-                    ? 'Defina o usuário e a senha próprios do seu painel. Esse login é independente de qualquer conta externa.'
-                    : 'Use seu usuário e senha de administrador para gerenciar o portfólio.'}
+                    ? 'Defina o usuário e a senha próprios do seu painel.'
+                    : 'Seu acesso permanece conectado neste navegador até você sair.'}
                 </p>
               </div>
 
@@ -830,39 +858,28 @@ export function AdminPanel({
                 </span>
               </div>
 
-              <div className="flex flex-wrap items-center gap-5">
-                {/* Mobile admin section nav */}
-                <div className="flex sm:hidden items-center gap-4 text-[#666662]">
-                  {(
-                    [
-                      { id: 'acervo', label: 'acervo' },
-                      { id: 'fluxo', label: 'fluxo' },
-                      { id: 'config', label: 'config' },
-                    ] as { id: AdminSection; label: string }[]
-                  ).map((tab) => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setSection(tab.id)}
-                      className={`cursor-pointer ${
-                        section === tab.id
-                          ? 'text-[#111111] underline underline-offset-4 decoration-[#1A3AFF]'
-                          : ''
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="inline-flex items-center gap-1.5 text-[#666662] hover:text-[#111111] transition-colors cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>sair</span>
-                </button>
+              {/* Mobile admin section nav */}
+              <div className="flex sm:hidden items-center gap-4 text-[#666662]">
+                {(
+                  [
+                    { id: 'acervo', label: 'acervo' },
+                    { id: 'fluxo', label: 'fluxo' },
+                    { id: 'config', label: 'config' },
+                  ] as { id: AdminSection; label: string }[]
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSection(tab.id)}
+                    className={`cursor-pointer ${
+                      section === tab.id
+                        ? 'text-[#111111] underline underline-offset-4 decoration-[#1A3AFF]'
+                        : ''
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
             </div>
 
