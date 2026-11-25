@@ -1,0 +1,6 @@
+{
+  "name": "coffee",
+  "description": "Arquivo pessoal e portfólio visual minimalista para guardar fotografias, vídeos e estudos gráficos em ritmo de catálogo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
