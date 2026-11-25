@@ -163,8 +163,8 @@ export default function App() {
                         ) : item.imageUrl ? (
                           <SafeImage
                             src={item.imageUrl}
-                            alt={item.title}
-                            fallbackLabel={item.filename}
+                            alt={item.title || `Item ${item.index}`}
+                            fallbackLabel={item.title || item.index}
                             className="w-full h-full object-cover"
                           />
                         ) : null}
@@ -177,14 +177,16 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="mt-2.5 flex items-baseline justify-between gap-3 font-mono text-[11px]">
-                        <span className="text-[#111111] group-hover:text-[#1A3AFF] transition-colors truncate">
-                          {item.filename}
-                        </span>
-                        <span className="text-[#666662] tabular-nums shrink-0">
-                          {item.date}
-                        </span>
-                      </div>
+                      {item.title && (
+                        <div className="mt-2.5 flex items-baseline justify-between gap-3 font-mono text-[11px]">
+                          <span className="text-[#111111] group-hover:text-[#1A3AFF] transition-colors truncate">
+                            {item.title}
+                          </span>
+                          <span className="text-[#666662] tabular-nums shrink-0">
+                            {item.date}
+                          </span>
+                        </div>
+                      )}
                     </button>
                   </article>
                 );
@@ -227,8 +229,8 @@ export default function App() {
                         ) : item.imageUrl ? (
                           <SafeImage
                             src={item.imageUrl}
-                            alt={item.title}
-                            fallbackLabel={item.filename}
+                            alt={item.title || `Item ${item.index}`}
+                            fallbackLabel={item.title || item.index}
                             className="w-full max-h-[75vh] object-contain mx-auto"
                           />
                         ) : null}
@@ -241,14 +243,16 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="mt-3 flex flex-col sm:flex-row sm:items-baseline justify-between gap-2">
-                        <p className="text-sm text-[#111111] group-hover:text-[#1A3AFF] transition-colors">
-                          {item.note}
-                        </p>
-                        <span className="font-mono text-xs text-[#666662] tabular-nums whitespace-nowrap shrink-0">
-                          {item.filename} · {item.format} · {item.date}
-                        </span>
-                      </div>
+                      {item.title && (
+                        <div className="mt-3 flex items-baseline justify-between gap-4">
+                          <p className="text-sm text-[#111111] group-hover:text-[#1A3AFF] transition-colors">
+                            {item.title}
+                          </p>
+                          <span className="font-mono text-xs text-[#666662] tabular-nums whitespace-nowrap shrink-0">
+                            {item.date}
+                          </span>
+                        </div>
+                      )}
                     </button>
                   </article>
                 );
@@ -267,20 +271,17 @@ export default function App() {
                     onFocus={() => setHoveredIndexItem(item)}
                     className="w-full py-3.5 border-b border-[#DCDCD4] grid grid-cols-12 items-baseline gap-3 text-left font-mono text-xs hover:text-[#1A3AFF] transition-colors cursor-pointer group"
                   >
-                    <span className="col-span-2 sm:col-span-1 text-[#666662] tabular-nums">
+                    <span className="col-span-2 sm:col-span-2 text-[#666662] tabular-nums">
                       {item.index}
                     </span>
-                    <span className="col-span-6 sm:col-span-5 text-[#111111] group-hover:text-[#1A3AFF] truncate">
-                      {item.filename}
+                    <span className="col-span-5 sm:col-span-5 text-[#111111] group-hover:text-[#1A3AFF] truncate">
+                      {item.title || '—'}
                     </span>
-                    <span className="hidden sm:block sm:col-span-3 text-[#666662] truncate">
-                      {item.format}
+                    <span className="col-span-2 sm:col-span-3 text-[#666662] truncate">
+                      {item.kind === 'video' ? 'vídeo' : 'foto'}
                       {item.duration ? ` · ${item.duration}` : ''}
                     </span>
-                    <span className="hidden md:block md:col-span-2 text-[#666662] truncate">
-                      {item.location}
-                    </span>
-                    <span className="col-span-4 sm:col-span-3 md:col-span-1 text-right text-[#666662] tabular-nums">
+                    <span className="col-span-3 sm:col-span-2 text-right text-[#666662] tabular-nums">
                       {item.date}
                     </span>
                   </button>
@@ -307,16 +308,17 @@ export default function App() {
                         ) : preview.imageUrl ? (
                           <SafeImage
                             src={preview.imageUrl}
-                            alt={preview.title}
-                            fallbackLabel={preview.filename}
+                            alt={preview.title || `Item ${preview.index}`}
+                            fallbackLabel={preview.title || preview.index}
                             className="w-full h-full object-cover"
                           />
                         ) : null}
                       </div>
-                      <p className="mt-3 text-sm text-[#111111]">{preview.note}</p>
-                      <p className="mt-1 font-mono text-xs text-[#666662] tabular-nums">
-                        {preview.filename} · {preview.location}
-                      </p>
+                      {preview.title && (
+                        <p className="mt-3 font-mono text-xs text-[#111111]">
+                          {preview.title}
+                        </p>
+                      )}
                     </div>
                   );
                 })()}

@@ -53,38 +53,40 @@ export function MediaLightbox({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-[#0A0A09] text-[#F7F7F5] flex flex-col justify-between"
+      className="fixed inset-0 z-50 bg-[#0A0A09] text-[#F7F7F5] flex items-center justify-center p-4 md:p-12"
       role="dialog"
       aria-modal="true"
-      aria-label={item.filename}
+      aria-label={item.title}
       onClick={onClose}
     >
-      {/* Top minimal bar */}
+      {/* Floating minimal controls (no captions) */}
       <div
-        className="px-5 md:px-8 h-14 flex items-center justify-between gap-4 border-b border-white/10 shrink-0"
+        className="fixed top-4 right-4 md:top-6 md:right-6 z-10 flex items-center gap-2"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="font-mono text-xs text-white/80 tabular-nums truncate">
-          {item.filename}
-        </div>
-        <div className="flex items-center gap-4 shrink-0">
-          <span className="font-mono text-xs text-white/50 tabular-nums">
-            {String(currentIndex + 1).padStart(2, '0')} / {String(items.length).padStart(2, '0')}
-          </span>
+        {item.isUserUpload && onDelete && (
           <button
             type="button"
-            onClick={onClose}
-            aria-label="Fechar"
-            className="w-9 h-9 flex items-center justify-center text-white/80 hover:text-white transition-colors cursor-pointer"
+            onClick={() => onDelete(item.id)}
+            aria-label="Remover mídia"
+            className="h-10 px-3 font-mono text-xs text-white/60 hover:text-white transition-colors cursor-pointer"
           >
-            <X className="w-5 h-5" />
+            apagar
           </button>
-        </div>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Fechar"
+          className="w-10 h-10 flex items-center justify-center text-white/75 hover:text-white transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-white"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
-      {/* Unobstructed darkroom media frame */}
+      {/* Unobstructed media frame */}
       <div
-        className="flex-1 relative flex items-center justify-center p-4 md:p-10 min-h-0"
+        className="relative w-full h-full flex items-center justify-center"
         onClick={(e) => e.stopPropagation()}
       >
         {item.kind === 'video' && item.videoUrl ? (
@@ -94,19 +96,17 @@ export function MediaLightbox({
             controls
             autoPlay
             playsInline
-            className="max-w-full max-h-full object-contain bg-black"
+            className="max-w-full max-h-[85vh] object-contain bg-black"
           />
         ) : item.imageUrl ? (
-          <div className="relative max-w-full max-h-full flex items-center justify-center">
-            <SafeImage
-              src={item.imageUrl}
-              alt={item.title}
-              fallbackLabel={item.filename}
-              className={`max-w-full max-h-[72vh] object-contain transition-transform duration-700 ease-out ${
-                isPlayingPreview ? 'scale-[1.02]' : 'scale-100'
-              }`}
-            />
-          </div>
+          <SafeImage
+            src={item.imageUrl}
+            alt={item.title}
+            fallbackLabel={item.title}
+            className={`max-w-full max-h-[85vh] object-contain transition-transform duration-700 ease-out ${
+              isPlayingPreview ? 'scale-[1.02]' : 'scale-100'
+            }`}
+          />
         ) : (
           <div
             role="img"
@@ -114,28 +114,23 @@ export function MediaLightbox({
             style={{ backgroundColor: item.swatchColor }}
             className={`relative border border-white/10 transition-transform duration-500 ease-out ${
               item.aspect === 'landscape'
-                ? 'w-full max-w-3xl aspect-[16/10]'
+                ? 'w-full max-w-4xl aspect-[16/10]'
                 : item.aspect === 'square'
-                  ? 'w-full max-w-lg aspect-square'
-                  : 'h-[68vh] aspect-[3/4] max-w-full'
+                  ? 'w-full max-w-xl aspect-square'
+                  : 'h-[78vh] aspect-[3/4] max-w-full'
             } ${isPlayingPreview ? 'scale-[1.015]' : 'scale-100'}`}
           >
             {item.kind === 'video' && (
               <button
                 type="button"
                 onClick={() => setIsPlayingPreview((prev) => !prev)}
-                className="absolute bottom-4 left-4 inline-flex items-center gap-2 px-3 py-1.5 font-mono text-xs bg-[#0A0A09]/85 text-white border border-white/25 hover:border-white transition-colors cursor-pointer"
+                aria-label={isPlayingPreview ? 'Pausar prévia' : 'Reproduzir prévia'}
+                className="absolute bottom-4 left-4 w-10 h-10 flex items-center justify-center bg-[#0A0A09]/85 text-white border border-white/25 hover:border-white transition-colors cursor-pointer"
               >
                 {isPlayingPreview ? (
-                  <>
-                    <Pause className="w-3 h-3" aria-hidden="true" />
-                    <span>pausar · {item.duration}</span>
-                  </>
+                  <Pause className="w-3.5 h-3.5" aria-hidden="true" />
                 ) : (
-                  <>
-                    <Play className="w-3 h-3" aria-hidden="true" />
-                    <span>vídeo · {item.duration}</span>
-                  </>
+                  <Play className="w-3.5 h-3.5 fill-current" aria-hidden="true" />
                 )}
               </button>
             )}
@@ -148,7 +143,7 @@ export function MediaLightbox({
               type="button"
               onClick={goPrev}
               aria-label="Anterior"
-              className="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-white/60 hover:text-white transition-colors cursor-pointer"
+              className="fixed left-3 md:left-6 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-white/60 hover:text-white transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-white"
             >
               <ChevronLeft className="w-6 h-6" />
             </button>
@@ -156,35 +151,11 @@ export function MediaLightbox({
               type="button"
               onClick={goNext}
               aria-label="Próximo"
-              className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-white/60 hover:text-white transition-colors cursor-pointer"
+              className="fixed right-3 md:right-6 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-white/60 hover:text-white transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-white"
             >
               <ChevronRight className="w-6 h-6" />
             </button>
           </>
-        )}
-      </div>
-
-      {/* Bottom single-line raw archival caption */}
-      <div
-        className="px-5 md:px-8 py-4 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="min-w-0">
-          <p className="text-sm text-white/95 truncate">{item.note}</p>
-          <p className="mt-1 font-mono text-xs text-white/55 tabular-nums">
-            {item.format} · {item.location} · {item.date}
-            {item.duration ? ` · ${item.duration}` : ''}
-          </p>
-        </div>
-
-        {item.isUserUpload && onDelete && (
-          <button
-            type="button"
-            onClick={() => onDelete(item.id)}
-            className="font-mono text-xs text-white/60 hover:text-white underline underline-offset-4 cursor-pointer self-start sm:self-auto shrink-0"
-          >
-            apagar registro
-          </button>
         )}
       </div>
     </div>
