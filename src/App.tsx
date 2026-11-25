@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { Header, PublicLayoutMode } from './components/Header';
 import { LoadingScreen } from './components/LoadingScreen';
@@ -17,6 +17,8 @@ import {
   SiteSettings,
 } from './data/archive';
 
+const CANVAS_REF_WIDTH = 1200;
+
 function isAdminRoute(pathname: string, hash: string): boolean {
   const cleanPath = pathname.trim().toLowerCase();
   const cleanHash = hash.replace(/^#/, '').trim().toLowerCase();
@@ -27,6 +29,89 @@ function isAdminRoute(pathname: string, hash: string): boolean {
     cleanHash === 'admin' ||
     cleanHash.startsWith('/admin/')
   );
+}
+
+function getDefaultWidthPercent(item: PortfolioItem): number {
+  if (item.displayWidth !== null) return item.displayWidth;
+  return item.aspect === 'landscape' ? 46 : 30;
+}
+
+function estimateRefHeight(item: PortfolioItem, widthPercent: number): number {
+  if (item.displayHeight !== null) return item.displayHeight + 36;
+  const widthRef = (widthPercent / 100) * CANVAS_REF_WIDTH;
+  const ratio =
+    item.aspect === 'landscape'
+      ? 0.68
+      : item.aspect === 'square'
+        ? 1.0
+        : 1.32;
+  return Math.round(widthRef * ratio) + 36;
+}
+
+interface ResolvedPlacement {
+  x: number;
+  y: number;
+  width: number;
+}
+
+function resolveCanvasPlacements(
+  items: PortfolioItem[],
+  forceTidyGrid = false,
+): Map<number, ResolvedPlacement> {
+  const result = new Map<number, ResolvedPlacement>();
+
+  let maxPositionedBottom = 0;
+  if (!forceTidyGrid) {
+    for (const item of items) {
+      if (item.posX !== null && item.posY !== null) {
+        const w = getDefaultWidthPercent(item);
+        const clampedX = Math.max(0, Math.min(100 - w, item.posX));
+        result.set(item.id, { x: clampedX, y: Math.max(0, item.posY), width: w });
+        const estBottom = item.posY + estimateRefHeight(item, w);
+        if (estBottom > maxPositionedBottom) {
+          maxPositionedBottom = estBottom;
+        }
+      }
+    }
+  }
+
+  let cursorX = 0;
+  let cursorY = maxPositionedBottom > 0 ? maxPositionedBottom + 48 : 0;
+  let rowHeight = 0;
+  const gapX = 3;
+  const gapY = 48;
+
+  for (const item of items) {
+    if (!forceTidyGrid && result.has(item.id)) continue;
+
+    const w = forceTidyGrid
+      ? item.aspect === 'landscape'
+        ? 46
+        : 30
+      : getDefaultWidthPercent(item);
+
+    if (cursorX > 0 && cursorX + w > 100) {
+      cursorX = 0;
+      cursorY += rowHeight + gapY;
+      rowHeight = 0;
+    }
+
+    const clampedX = Math.round(Math.max(0, Math.min(100 - w, cursorX)) * 10) / 10;
+    result.set(item.id, {
+      x: clampedX,
+      y: Math.round(cursorY),
+      width: w,
+    });
+
+    const estH = estimateRefHeight(
+      forceTidyGrid ? { ...item, displayHeight: null } : item,
+      w,
+    );
+    if (estH > rowHeight) rowHeight = estH;
+    cursorX += w + gapX;
+  }
+
+  return result;
 }
 
 export default function App() {
@@ -44,7 +129,9 @@ export default function App() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [layoutMode, setLayoutMode] = useState<PublicLayoutMode>('folha');
   const [isEditMode, setIsEditMode] = useState(false);
+  const [activeEditItemId, setActiveEditItemId] = useState<number | null>(null);
   const [savingItemId, setSavingItemId] = useState<number | null>(null);
+  const [isTidying, setIsTidying] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
   const [items, setItems] = useState<PortfolioItem[]>([]);
@@ -53,7 +140,11 @@ export default function App() {
 
   const [selectedItem, setSelectedItem] = useState<PortfolioItem | null>(null);
   const [hoveredIndexItem, setHoveredIndexItem] = useState<PortfolioItem | null>(null);
-  const galleryRef = useRef<HTMLDivElement | null>(null);
+
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [canvasWidth, setCanvasWidth] = useState<number>(CANVAS_REF_WIDTH);
+  const itemBottomsRef = useRef<Map<number, number>>(new Map());
+  const [measuredMaxBottom, setMeasuredMaxBottom] = useState<number>(0);
 
   const handleLoadingComplete = useCallback(() => {
     setIsLoading(false);
@@ -82,6 +173,53 @@ export default function App() {
     };
   }, []);
 
+  // Track canvas container width so spatial coordinates scale cleanly on every viewport
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+
+    const updateWidth = () => {
+      const next = el.getBoundingClientRect().width;
+      if (next > 0) setCanvasWidth(next);
+    };
+
+    updateWidth();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(updateWidth);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [layoutMode, loadingPortfolio, items.length, onAdminPage]);
+
+  const handleMeasureBottom = useCallback((id: number, bottomPx: number) => {
+    const prev = itemBottomsRef.current.get(id);
+    if (prev !== undefined && Math.abs(prev - bottomPx) < 1) return;
+    itemBottomsRef.current.set(id, bottomPx);
+    let maxB = 0;
+    itemBottomsRef.current.forEach((val) => {
+      if (val > maxB) maxB = val;
+    });
+    setMeasuredMaxBottom((curr) => (Math.abs(curr - maxB) >= 1 ? maxB : curr));
+  }, []);
+
+  // Prune stale measurements when items change
+  useEffect(() => {
+    const validIds = new Set(items.map((entry) => entry.id));
+    let changed = false;
+    itemBottomsRef.current.forEach((_val, key) => {
+      if (!validIds.has(key)) {
+        itemBottomsRef.current.delete(key);
+        changed = true;
+      }
+    });
+    if (changed) {
+      let maxB = 0;
+      itemBottomsRef.current.forEach((val) => {
+        if (val > maxB) maxB = val;
+      });
+      setMeasuredMaxBottom(maxB);
+    }
+  }, [items]);
+
   const notifyAuthChanged = useCallback(() => {
     if (typeof BroadcastChannel !== 'undefined') {
       try {
@@ -94,38 +232,36 @@ export default function App() {
     }
   }, []);
 
-  const syncAuthSession = useCallback(
-    async (tokenOverride?: string | null) => {
-      try {
-        const headers: Record<string, string> = {};
-        if (tokenOverride) {
-          headers.Authorization = `Bearer ${tokenOverride}`;
-        }
-        const res = await fetch('/api/admin/auth/me', {
-          credentials: 'include',
-          cache: 'no-store',
-          headers,
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.authenticated) {
-          setAdminSession((prev) => ({
-            username: data.username || 'admin',
-            envPasscodeActive: Boolean(data.envPasscodeActive),
-            token: prev?.token ?? tokenOverride ?? null,
-          }));
-        } else {
-          setAdminSession(null);
-          setIsEditMode(false);
-        }
-      } catch {
-        // Ignore transient network errors during silent session check
-      } finally {
-        setSessionChecked(true);
+  const syncAuthSession = useCallback(async (tokenOverride?: string | null) => {
+    try {
+      const headers: Record<string, string> = {};
+      if (tokenOverride) {
+        headers.Authorization = `Bearer ${tokenOverride}`;
       }
-    },
-    [],
-  );
+      const res = await fetch('/api/admin/auth/me', {
+        credentials: 'include',
+        cache: 'no-store',
+        headers,
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.authenticated) {
+        setAdminSession((prev) => ({
+          username: data.username || 'admin',
+          envPasscodeActive: Boolean(data.envPasscodeActive),
+          token: prev?.token ?? tokenOverride ?? null,
+        }));
+      } else {
+        setAdminSession(null);
+        setIsEditMode(false);
+        setActiveEditItemId(null);
+      }
+    } catch {
+      // Ignore transient network errors during silent session check
+    } finally {
+      setSessionChecked(true);
+    }
+  }, []);
 
   // Restore & keep admin session in sync across reloads, focus, visibility, and tabs
   useEffect(() => {
@@ -204,6 +340,7 @@ export default function App() {
       setAdminSession(next);
       if (!next) {
         setIsEditMode(false);
+        setActiveEditItemId(null);
       }
       notifyAuthChanged();
     },
@@ -227,6 +364,7 @@ export default function App() {
       // Ignore network error during logout
     } finally {
       setIsEditMode(false);
+      setActiveEditItemId(null);
       setAdminSession(null);
       notifyAuthChanged();
     }
@@ -234,6 +372,7 @@ export default function App() {
 
   const handleToggleEditMode = useCallback(() => {
     setEditError(null);
+    setActiveEditItemId(null);
     setIsEditMode((prev) => {
       const next = !prev;
       if (next && layoutMode !== 'folha') {
@@ -247,47 +386,97 @@ export default function App() {
     setLayoutMode(mode);
     if (mode !== 'folha') {
       setIsEditMode(false);
+      setActiveEditItemId(null);
     }
   }, []);
 
-  const handleResizeCommit = useCallback(
+  const placements = useMemo(() => resolveCanvasPlacements(items), [items]);
+  const scale = canvasWidth / CANVAS_REF_WIDTH;
+
+  const buildAdminHeaders = useCallback((): Record<string, string> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'coffee-admin',
+    };
+    if (adminSession?.token) {
+      headers.Authorization = `Bearer ${adminSession.token}`;
+    }
+    return headers;
+  }, [adminSession?.token]);
+
+  const handleLayoutCommit = useCallback(
     async (id: number, patch: LayoutPatch) => {
       if (!adminSession) return;
       setEditError(null);
       setSavingItemId(id);
 
-      // Optimistic update so the layout stays instant
+      // Freeze any sibling items that haven't been positioned yet so they stay put
+      const unpositionedSiblings = items.filter(
+        (entry) => entry.id !== id && (entry.posX === null || entry.posY === null),
+      );
+
+      const currentPlacement = placements.get(id);
+      const targetPatch: LayoutPatch = {
+        posX: patch.posX !== undefined ? patch.posX : currentPlacement?.x ?? 0,
+        posY: patch.posY !== undefined ? patch.posY : currentPlacement?.y ?? 0,
+        ...(patch.displayWidth !== undefined
+          ? { displayWidth: patch.displayWidth }
+          : {}),
+        ...(patch.displayHeight !== undefined
+          ? { displayHeight: patch.displayHeight }
+          : {}),
+        ...(patch.zIndex !== undefined ? { zIndex: patch.zIndex } : {}),
+      };
+
+      const batchEntries: Array<{ id: number } & LayoutPatch> = [
+        { id, ...targetPatch },
+        ...unpositionedSiblings.map((sibling) => {
+          const placed = placements.get(sibling.id);
+          return {
+            id: sibling.id,
+            posX: placed?.x ?? 0,
+            posY: placed?.y ?? 0,
+            displayWidth: placed?.width ?? getDefaultWidthPercent(sibling),
+          };
+        }),
+      ];
+
+      // Optimistic local state update
+      const patchById = new Map(batchEntries.map((entry) => [entry.id, entry]));
       setItems((prev) =>
-        prev.map((entry) =>
-          entry.id === id
-            ? {
-                ...entry,
-                ...(patch.displayWidth !== undefined
-                  ? { displayWidth: patch.displayWidth }
-                  : {}),
-                ...(patch.displayHeight !== undefined
-                  ? { displayHeight: patch.displayHeight }
-                  : {}),
-              }
-            : entry,
-        ),
+        prev.map((entry) => {
+          const delta = patchById.get(entry.id);
+          if (!delta) return entry;
+          return {
+            ...entry,
+            ...(delta.displayWidth !== undefined
+              ? { displayWidth: delta.displayWidth }
+              : {}),
+            ...(delta.displayHeight !== undefined
+              ? { displayHeight: delta.displayHeight }
+              : {}),
+            ...(delta.posX !== undefined ? { posX: delta.posX } : {}),
+            ...(delta.posY !== undefined ? { posY: delta.posY } : {}),
+            ...(delta.zIndex !== undefined ? { zIndex: delta.zIndex } : {}),
+          };
+        }),
       );
 
       try {
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'coffee-admin',
-        };
-        if (adminSession.token) {
-          headers.Authorization = `Bearer ${adminSession.token}`;
-        }
-
-        const res = await fetch(`/api/admin/items/${id}`, {
-          method: 'PATCH',
-          credentials: 'include',
-          headers,
-          body: JSON.stringify(patch),
-        });
+        const res =
+          batchEntries.length === 1
+            ? await fetch(`/api/admin/items/${id}`, {
+                method: 'PATCH',
+                credentials: 'include',
+                headers: buildAdminHeaders(),
+                body: JSON.stringify(targetPatch),
+              })
+            : await fetch('/api/admin/items/layout', {
+                method: 'POST',
+                credentials: 'include',
+                headers: buildAdminHeaders(),
+                body: JSON.stringify({ entries: batchEntries }),
+              });
 
         if (res.status === 401) {
           setIsEditMode(false);
@@ -297,53 +486,65 @@ export default function App() {
 
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || 'Não foi possível salvar o tamanho.');
+          throw new Error(body.error || 'Não foi possível salvar a posição.');
         }
 
-        const updated = (await res.json()) as PortfolioItem;
-        setItems((prev) =>
-          prev.map((entry) => (entry.id === id ? updated : entry)),
-        );
+        if (batchEntries.length === 1) {
+          const updated = (await res.json()) as PortfolioItem;
+          setItems((prev) =>
+            prev.map((entry) => (entry.id === id ? updated : entry)),
+          );
+        }
       } catch (err) {
         setEditError(
-          err instanceof Error ? err.message : 'Erro ao salvar redimensionamento.',
+          err instanceof Error ? err.message : 'Erro ao salvar layout.',
         );
         fetchPortfolio();
       } finally {
         setSavingItemId(null);
       }
     },
-    [adminSession, fetchPortfolio],
+    [adminSession, buildAdminHeaders, fetchPortfolio, items, placements],
   );
 
-  const handleMoveHomeItem = useCallback(
-    async (index: number, direction: -1 | 1) => {
+  const handleBringToFront = useCallback(
+    (id: number) => {
+      const maxZ = items.reduce((acc, entry) => Math.max(acc, entry.zIndex || 1), 1);
+      handleLayoutCommit(id, { zIndex: maxZ + 1 });
+    },
+    [handleLayoutCommit, items],
+  );
+
+  const handleSendToBack = useCallback(
+    async (id: number) => {
       if (!adminSession) return;
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= items.length) return;
-
-      const reordered = [...items];
-      const [moved] = reordered.splice(index, 1);
-      reordered.splice(targetIndex, 0, moved);
-
       setEditError(null);
-      setSavingItemId(moved.id);
-      setItems(reordered);
+      setSavingItemId(id);
+
+      // Re-index all items so the target sits at zIndex 1 and everything else stays >= 2
+      const others = items
+        .filter((entry) => entry.id !== id)
+        .sort((a, b) => (a.zIndex || 1) - (b.zIndex || 1));
+
+      const entries: Array<{ id: number; zIndex: number }> = [
+        { id, zIndex: 1 },
+        ...others.map((entry, idx) => ({ id: entry.id, zIndex: idx + 2 })),
+      ];
+
+      const zById = new Map(entries.map((entry) => [entry.id, entry.zIndex]));
+      setItems((prev) =>
+        prev.map((entry) => ({
+          ...entry,
+          zIndex: zById.get(entry.id) ?? entry.zIndex,
+        })),
+      );
 
       try {
-        const headers: Record<string, string> = {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'coffee-admin',
-        };
-        if (adminSession.token) {
-          headers.Authorization = `Bearer ${adminSession.token}`;
-        }
-
-        const res = await fetch('/api/admin/items/reorder', {
+        const res = await fetch('/api/admin/items/layout', {
           method: 'POST',
           credentials: 'include',
-          headers,
-          body: JSON.stringify({ ids: reordered.map((entry) => entry.id) }),
+          headers: buildAdminHeaders(),
+          body: JSON.stringify({ entries }),
         });
 
         if (res.status === 401) {
@@ -351,27 +552,93 @@ export default function App() {
           setAdminSession(null);
           return;
         }
-
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || 'Não foi possível salvar a ordem.');
+          throw new Error(body.error || 'Não foi possível ajustar a camada.');
         }
       } catch (err) {
         setEditError(
-          err instanceof Error ? err.message : 'Erro ao reordenar itens.',
+          err instanceof Error ? err.message : 'Erro ao ajustar camada.',
         );
         fetchPortfolio();
       } finally {
         setSavingItemId(null);
       }
     },
-    [adminSession, fetchPortfolio, items],
+    [adminSession, buildAdminHeaders, fetchPortfolio, items],
   );
+
+  const handleTidyGrid = useCallback(async () => {
+    if (!adminSession || items.length === 0) return;
+    setEditError(null);
+    setIsTidying(true);
+
+    const tidyMap = resolveCanvasPlacements(items, true);
+    const entries = items.map((entry, idx) => {
+      const placed = tidyMap.get(entry.id);
+      return {
+        id: entry.id,
+        posX: placed?.x ?? 0,
+        posY: placed?.y ?? 0,
+        displayWidth: placed?.width ?? (entry.aspect === 'landscape' ? 46 : 30),
+        displayHeight: null as number | null,
+        zIndex: idx + 1,
+      };
+    });
+
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    setItems((prev) =>
+      prev.map((entry) => {
+        const next = byId.get(entry.id);
+        return next
+          ? {
+              ...entry,
+              posX: next.posX,
+              posY: next.posY,
+              displayWidth: next.displayWidth,
+              displayHeight: null,
+              zIndex: next.zIndex,
+            }
+          : entry;
+      }),
+    );
+
+    try {
+      const res = await fetch('/api/admin/items/layout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: buildAdminHeaders(),
+        body: JSON.stringify({ entries }),
+      });
+
+      if (res.status === 401) {
+        setIsEditMode(false);
+        setAdminSession(null);
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Não foi possível reorganizar a grade.');
+      }
+    } catch (err) {
+      setEditError(
+        err instanceof Error ? err.message : 'Erro ao reorganizar.',
+      );
+      fetchPortfolio();
+    } finally {
+      setIsTidying(false);
+    }
+  }, [adminSession, buildAdminHeaders, fetchPortfolio, items]);
 
   const handleNavigateHome = useCallback(() => {
     navigate('/');
     fetchPortfolio();
   }, [fetchPortfolio, navigate]);
+
+  const canvasMinHeightPx = Math.max(
+    isEditMode ? 680 : 320,
+    Math.ceil(measuredMaxBottom + (isEditMode ? 240 : 48)),
+  );
 
   // Dedicated standalone Admin Page (/admin)
   if (onAdminPage) {
@@ -412,16 +679,27 @@ export default function App() {
         {isEditMode && adminSession && (
           <div className="py-3 border-b border-[#DCDCD4] flex flex-wrap items-center justify-between gap-3 font-mono text-xs text-[#666662]">
             <span>
-              modo livre · arraste as bordas ou o canto para ajustar largura e altura, ou use{' '}
-              <span className="text-[#111111]">← →</span> para reordenar
+              modo livre · arraste qualquer imagem para onde quiser e puxe as bordas ou cantos para mudar o tamanho
             </span>
-            {editError ? (
-              <span className="text-[#B91C1C]">{editError}</span>
-            ) : savingItemId !== null ? (
-              <span className="text-[#1A3AFF]">salvando...</span>
-            ) : (
-              <span className="text-[#111111]">alterações salvas automaticamente</span>
-            )}
+            <div className="flex items-center gap-4">
+              {items.length > 0 && (
+                <button
+                  type="button"
+                  disabled={isTidying}
+                  onClick={handleTidyGrid}
+                  className="px-2.5 py-1 border border-[#DCDCD4] text-[#111111] hover:border-[#111111] transition-colors cursor-pointer disabled:opacity-40"
+                >
+                  {isTidying ? 'organizando...' : 'organizar grade'}
+                </button>
+              )}
+              {editError ? (
+                <span className="text-[#B91C1C]">{editError}</span>
+              ) : savingItemId !== null ? (
+                <span className="text-[#1A3AFF]">salvando...</span>
+              ) : (
+                <span className="text-[#111111]">salvo automaticamente</span>
+              )}
+            </div>
           </div>
         )}
 
@@ -438,26 +716,55 @@ export default function App() {
               </p>
             </div>
           ) : layoutMode === 'folha' ? (
-            /* Contact Sheet View — Free Admin Layout Editing */
+            /* Freeform Spatial Canvas — Move Anywhere & Resize Freely Inside Site Bounds */
             <div
-              ref={galleryRef}
-              className="flex flex-wrap items-end gap-x-6 gap-y-12"
+              ref={canvasRef}
+              onPointerDown={() => {
+                if (isEditMode) setActiveEditItemId(null);
+              }}
+              style={{
+                minHeight: `${canvasMinHeightPx}px`,
+                backgroundImage:
+                  isEditMode && adminSession
+                    ? 'radial-gradient(#D2D2CA 1px, transparent 1px)'
+                    : undefined,
+                backgroundSize:
+                  isEditMode && adminSession ? '24px 24px' : undefined,
+              }}
+              className={`relative w-full overflow-x-clip ${
+                isEditMode && adminSession
+                  ? 'border border-dashed border-[#DCDCD4]'
+                  : ''
+              }`}
             >
-              {items.map((item, idx) => (
-                <ResizablePortfolioItem
-                  key={item.id}
-                  item={item}
-                  index={idx}
-                  canMovePrev={idx > 0}
-                  canMoveNext={idx < items.length - 1}
-                  isEditMode={isEditMode && Boolean(adminSession)}
-                  isSaving={savingItemId === item.id}
-                  containerRef={galleryRef}
-                  onSelect={setSelectedItem}
-                  onResizeCommit={handleResizeCommit}
-                  onMove={(dir) => handleMoveHomeItem(idx, dir)}
-                />
-              ))}
+              {items.map((item, idx) => {
+                const placement = placements.get(item.id) ?? {
+                  x: 0,
+                  y: 0,
+                  width: getDefaultWidthPercent(item),
+                };
+                return (
+                  <ResizablePortfolioItem
+                    key={item.id}
+                    item={item}
+                    index={idx}
+                    resolvedX={placement.x}
+                    resolvedY={placement.y}
+                    resolvedWidth={placement.width}
+                    canvasWidth={canvasWidth}
+                    scale={scale}
+                    isEditMode={isEditMode && Boolean(adminSession)}
+                    isActive={activeEditItemId === item.id}
+                    isSaving={savingItemId === item.id}
+                    onSelectForView={setSelectedItem}
+                    onActivate={(targetId) => setActiveEditItemId(targetId)}
+                    onBringToFront={handleBringToFront}
+                    onSendToBack={handleSendToBack}
+                    onLayoutCommit={handleLayoutCommit}
+                    onMeasureBottom={handleMeasureBottom}
+                  />
+                );
+              })}
             </div>
           ) : (
             /* Raw Text Directory Index with Side Hover Preview */

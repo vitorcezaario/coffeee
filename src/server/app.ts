@@ -18,6 +18,7 @@ import {
   revokeOtherAdminSessions,
   updateAdminCredentials,
   updatePortfolioItem,
+  updatePortfolioLayoutBatch,
   updateSiteSettings,
 } from '../db/repository.ts';
 import {
@@ -577,6 +578,9 @@ export function createApiApp(): Express {
         published?: boolean;
         displayWidth?: number | null;
         displayHeight?: number | null;
+        posX?: number | null;
+        posY?: number | null;
+        zIndex?: number;
       } = {};
 
       if (typeof req.body.title === 'string') {
@@ -598,7 +602,7 @@ export function createApiApp(): Express {
         typeof req.body.displayWidth === 'number' &&
         Number.isFinite(req.body.displayWidth)
       ) {
-        updates.displayWidth = Math.max(10, Math.min(100, Math.round(req.body.displayWidth)));
+        updates.displayWidth = Math.max(5, Math.min(100, Math.round(req.body.displayWidth)));
       }
       if (req.body.displayHeight === null) {
         updates.displayHeight = null;
@@ -606,7 +610,20 @@ export function createApiApp(): Express {
         typeof req.body.displayHeight === 'number' &&
         Number.isFinite(req.body.displayHeight)
       ) {
-        updates.displayHeight = Math.max(100, Math.min(1200, Math.round(req.body.displayHeight)));
+        updates.displayHeight = Math.max(60, Math.min(3000, Math.round(req.body.displayHeight)));
+      }
+      if (req.body.posX === null) {
+        updates.posX = null;
+      } else if (typeof req.body.posX === 'number' && Number.isFinite(req.body.posX)) {
+        updates.posX = Math.max(0, Math.min(95, Math.round(req.body.posX * 10) / 10));
+      }
+      if (req.body.posY === null) {
+        updates.posY = null;
+      } else if (typeof req.body.posY === 'number' && Number.isFinite(req.body.posY)) {
+        updates.posY = Math.max(0, Math.min(20000, Math.round(req.body.posY)));
+      }
+      if (typeof req.body.zIndex === 'number' && Number.isFinite(req.body.zIndex)) {
+        updates.zIndex = Math.max(1, Math.min(10000, Math.trunc(req.body.zIndex)));
       }
 
       if (Object.keys(updates).length === 0) {
@@ -626,9 +643,63 @@ export function createApiApp(): Express {
     }
   });
 
+  // Admin: batch update freeform canvas positions & sizes
+  app.post('/api/admin/items/layout', requireAdmin, async (req: AuthRequest, res: Response) => {
+    const rawEntries = req.body?.entries;
+    if (!Array.isArray(rawEntries) || rawEntries.length === 0 || rawEntries.length > 500) {
+      res.status(400).json({ error: 'Layout inválido.' });
+      return;
+    }
+
+    const sanitized: Array<{
+      id: number;
+      displayWidth?: number | null;
+      displayHeight?: number | null;
+      posX?: number | null;
+      posY?: number | null;
+      zIndex?: number;
+    }> = [];
+
+    for (const raw of rawEntries) {
+      if (!raw || typeof raw !== 'object') continue;
+      const id = Number(raw.id);
+      if (!Number.isInteger(id) || id <= 0) continue;
+      const entry: (typeof sanitized)[number] = { id };
+      if (raw.displayWidth === null || (typeof raw.displayWidth === 'number' && Number.isFinite(raw.displayWidth))) {
+        entry.displayWidth = raw.displayWidth;
+      }
+      if (raw.displayHeight === null || (typeof raw.displayHeight === 'number' && Number.isFinite(raw.displayHeight))) {
+        entry.displayHeight = raw.displayHeight;
+      }
+      if (raw.posX === null || (typeof raw.posX === 'number' && Number.isFinite(raw.posX))) {
+        entry.posX = raw.posX;
+      }
+      if (raw.posY === null || (typeof raw.posY === 'number' && Number.isFinite(raw.posY))) {
+        entry.posY = raw.posY;
+      }
+      if (typeof raw.zIndex === 'number' && Number.isFinite(raw.zIndex)) {
+        entry.zIndex = raw.zIndex;
+      }
+      sanitized.push(entry);
+    }
+
+    if (sanitized.length === 0) {
+      res.status(400).json({ error: 'Nenhum item válido enviado.' });
+      return;
+    }
+
+    try {
+      await updatePortfolioLayoutBatch(sanitized);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('POST /api/admin/items/layout failed:', error);
+      res.status(500).json({ error: 'Erro ao salvar o layout.' });
+    }
+  });
+
   // Admin: reorder items
   app.post('/api/admin/items/reorder', requireAdmin, async (req: AuthRequest, res: Response) => {
-    const rawIds = req.body?.orderedIds;
+    const rawIds = req.body?.orderedIds ?? req.body?.ids;
     if (
       !Array.isArray(rawIds) ||
       rawIds.length === 0 ||

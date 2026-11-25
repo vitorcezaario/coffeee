@@ -18,6 +18,9 @@ export interface PortfolioItemSummary {
   duration: string | null;
   displayWidth: number | null;
   displayHeight: number | null;
+  posX: number | null;
+  posY: number | null;
+  zIndex: number;
   sortOrder: number;
   published: boolean;
   createdAt: string;
@@ -385,6 +388,9 @@ export async function listPortfolioItems(includeDrafts: boolean): Promise<Portfo
         duration: portfolioItems.duration,
         displayWidth: portfolioItems.displayWidth,
         displayHeight: portfolioItems.displayHeight,
+        posX: portfolioItems.posX,
+        posY: portfolioItems.posY,
+        zIndex: portfolioItems.zIndex,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -409,6 +415,9 @@ export async function listPortfolioItems(includeDrafts: boolean): Promise<Portfo
       duration: row.duration,
       displayWidth: row.displayWidth ?? null,
       displayHeight: row.displayHeight ?? null,
+      posX: row.posX ?? null,
+      posY: row.posY ?? null,
+      zIndex: row.zIndex ?? 1,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),
@@ -478,6 +487,9 @@ export async function createPortfolioItem(params: {
         duration: portfolioItems.duration,
         displayWidth: portfolioItems.displayWidth,
         displayHeight: portfolioItems.displayHeight,
+        posX: portfolioItems.posX,
+        posY: portfolioItems.posY,
+        zIndex: portfolioItems.zIndex,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -496,6 +508,9 @@ export async function createPortfolioItem(params: {
       duration: row.duration,
       displayWidth: row.displayWidth ?? null,
       displayHeight: row.displayHeight ?? null,
+      posX: row.posX ?? null,
+      posY: row.posY ?? null,
+      zIndex: row.zIndex ?? 1,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),
@@ -515,6 +530,9 @@ export async function updatePortfolioItem(
     published?: boolean;
     displayWidth?: number | null;
     displayHeight?: number | null;
+    posX?: number | null;
+    posY?: number | null;
+    zIndex?: number;
     sortOrder?: number;
   },
 ): Promise<PortfolioItemSummary | null> {
@@ -535,7 +553,7 @@ export async function updatePortfolioItem(
       typeof updates.displayWidth === 'number' &&
       Number.isFinite(updates.displayWidth)
     ) {
-      setPayload.displayWidth = Math.max(10, Math.min(100, Math.round(updates.displayWidth)));
+      setPayload.displayWidth = Math.max(5, Math.min(100, Math.round(updates.displayWidth)));
     }
     if (updates.displayHeight === null) {
       setPayload.displayHeight = null;
@@ -543,7 +561,21 @@ export async function updatePortfolioItem(
       typeof updates.displayHeight === 'number' &&
       Number.isFinite(updates.displayHeight)
     ) {
-      setPayload.displayHeight = Math.max(100, Math.min(1200, Math.round(updates.displayHeight)));
+      setPayload.displayHeight = Math.max(60, Math.min(3000, Math.round(updates.displayHeight)));
+    }
+    if (updates.posX === null) {
+      setPayload.posX = null;
+    } else if (typeof updates.posX === 'number' && Number.isFinite(updates.posX)) {
+      const clampedX = Math.max(0, Math.min(95, Math.round(updates.posX * 10) / 10));
+      setPayload.posX = clampedX;
+    }
+    if (updates.posY === null) {
+      setPayload.posY = null;
+    } else if (typeof updates.posY === 'number' && Number.isFinite(updates.posY)) {
+      setPayload.posY = Math.max(0, Math.min(20000, Math.round(updates.posY)));
+    }
+    if (typeof updates.zIndex === 'number' && Number.isFinite(updates.zIndex)) {
+      setPayload.zIndex = Math.max(1, Math.min(10000, Math.trunc(updates.zIndex)));
     }
     if (typeof updates.sortOrder === 'number' && Number.isFinite(updates.sortOrder)) {
       setPayload.sortOrder = Math.trunc(updates.sortOrder);
@@ -562,6 +594,9 @@ export async function updatePortfolioItem(
         duration: portfolioItems.duration,
         displayWidth: portfolioItems.displayWidth,
         displayHeight: portfolioItems.displayHeight,
+        posX: portfolioItems.posX,
+        posY: portfolioItems.posY,
+        zIndex: portfolioItems.zIndex,
         sortOrder: portfolioItems.sortOrder,
         published: portfolioItems.published,
         createdAt: portfolioItems.createdAt,
@@ -581,6 +616,9 @@ export async function updatePortfolioItem(
       duration: row.duration,
       displayWidth: row.displayWidth ?? null,
       displayHeight: row.displayHeight ?? null,
+      posX: row.posX ?? null,
+      posY: row.posY ?? null,
+      zIndex: row.zIndex ?? 1,
       sortOrder: row.sortOrder,
       published: row.published,
       createdAt: row.createdAt.toISOString(),
@@ -589,6 +627,63 @@ export async function updatePortfolioItem(
   } catch (error) {
     console.error('Failed to update portfolio item:', error);
     throw new Error('Não foi possível atualizar o item.', { cause: error });
+  }
+}
+
+export interface LayoutBatchEntry {
+  id: number;
+  displayWidth?: number | null;
+  displayHeight?: number | null;
+  posX?: number | null;
+  posY?: number | null;
+  zIndex?: number;
+}
+
+export async function updatePortfolioLayoutBatch(entries: LayoutBatchEntry[]) {
+  try {
+    await db.transaction(async (tx) => {
+      for (const entry of entries) {
+        const setPayload: Partial<typeof portfolioItems.$inferInsert> = {};
+        if (entry.displayWidth === null) {
+          setPayload.displayWidth = null;
+        } else if (
+          typeof entry.displayWidth === 'number' &&
+          Number.isFinite(entry.displayWidth)
+        ) {
+          setPayload.displayWidth = Math.max(5, Math.min(100, Math.round(entry.displayWidth)));
+        }
+        if (entry.displayHeight === null) {
+          setPayload.displayHeight = null;
+        } else if (
+          typeof entry.displayHeight === 'number' &&
+          Number.isFinite(entry.displayHeight)
+        ) {
+          setPayload.displayHeight = Math.max(60, Math.min(3000, Math.round(entry.displayHeight)));
+        }
+        if (entry.posX === null) {
+          setPayload.posX = null;
+        } else if (typeof entry.posX === 'number' && Number.isFinite(entry.posX)) {
+          setPayload.posX = Math.max(0, Math.min(95, Math.round(entry.posX * 10) / 10));
+        }
+        if (entry.posY === null) {
+          setPayload.posY = null;
+        } else if (typeof entry.posY === 'number' && Number.isFinite(entry.posY)) {
+          setPayload.posY = Math.max(0, Math.min(20000, Math.round(entry.posY)));
+        }
+        if (typeof entry.zIndex === 'number' && Number.isFinite(entry.zIndex)) {
+          setPayload.zIndex = Math.max(1, Math.min(10000, Math.trunc(entry.zIndex)));
+        }
+        if (Object.keys(setPayload).length > 0) {
+          await tx
+            .update(portfolioItems)
+            .set(setPayload)
+            .where(eq(portfolioItems.id, entry.id));
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Failed to batch update portfolio layout:', error);
+    throw new Error('Não foi possível salvar a posição dos itens.', { cause: error });
   }
 }
 

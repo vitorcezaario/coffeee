@@ -124,12 +124,18 @@ export async function ensureExternalSchema(): Promise<void> {
           "duration" text,
           "display_width" integer,
           "display_height" integer,
+          "pos_x" real,
+          "pos_y" integer,
+          "z_index" integer DEFAULT 1 NOT NULL,
           "sort_order" integer DEFAULT 0 NOT NULL,
           "published" boolean DEFAULT true NOT NULL,
           "created_at" timestamp DEFAULT now() NOT NULL
         );
         ALTER TABLE "portfolio_items" ADD COLUMN IF NOT EXISTS "display_width" integer;
         ALTER TABLE "portfolio_items" ADD COLUMN IF NOT EXISTS "display_height" integer;
+        ALTER TABLE "portfolio_items" ADD COLUMN IF NOT EXISTS "pos_x" real;
+        ALTER TABLE "portfolio_items" ADD COLUMN IF NOT EXISTS "pos_y" integer;
+        ALTER TABLE "portfolio_items" ADD COLUMN IF NOT EXISTS "z_index" integer DEFAULT 1 NOT NULL;
       `);
     })().catch((err) => {
       global._externalSchemaReady = undefined;

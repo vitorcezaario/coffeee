@@ -10,6 +10,9 @@ export interface PortfolioItem {
   duration: string | null;
   displayWidth: number | null;
   displayHeight: number | null;
+  posX: number | null;
+  posY: number | null;
+  zIndex: number;
   sortOrder: number;
   published: boolean;
   createdAt: string;
