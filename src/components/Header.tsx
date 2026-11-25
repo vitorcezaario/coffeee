@@ -3,13 +3,13 @@ import { ArchiveFilter } from '../data/archive';
 interface HeaderProps {
   activeFilter: ArchiveFilter;
   onSelectFilter: (filter: ArchiveFilter) => void;
-  onOpenUpload: () => void;
+  onReplayIntro: () => void;
 }
 
 export function Header({
   activeFilter,
   onSelectFilter,
-  onOpenUpload,
+  onReplayIntro,
 }: HeaderProps) {
   const handleFilterClick = (filter: ArchiveFilter) => {
     onSelectFilter(filter);
@@ -78,10 +78,10 @@ export function Header({
         <div className="shrink-0">
           <button
             type="button"
-            onClick={onOpenUpload}
+            onClick={onReplayIntro}
             className="px-3.5 py-2 font-mono text-xs bg-[#111111] text-[#F7F7F5] hover:bg-[#1A3AFF] transition-colors duration-150 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1A3AFF]"
           >
-            + subir
+            abertura
           </button>
         </div>
       </div>

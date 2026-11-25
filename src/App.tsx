@@ -4,7 +4,6 @@ import { Play } from 'lucide-react';
 import { Header } from './components/Header';
 import { LoadingScreen } from './components/LoadingScreen';
 import { MediaLightbox } from './components/MediaLightbox';
-import { AddMediaModal } from './components/AddMediaModal';
 import { SafeImage } from './components/SafeImage';
 import {
   ArchiveFilter,
@@ -17,12 +16,11 @@ type LayoutMode = 'folha' | 'fluxo' | 'indice';
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [loaderKey, setLoaderKey] = useState(0);
-  const [items, setItems] = useState<ArchiveItem[]>(INITIAL_ARCHIVE_ITEMS);
+  const items = INITIAL_ARCHIVE_ITEMS;
   const [activeFilter, setActiveFilter] = useState<ArchiveFilter>('tudo');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('folha');
   const [selectedItem, setSelectedItem] = useState<ArchiveItem | null>(null);
   const [hoveredIndexItem, setHoveredIndexItem] = useState<ArchiveItem | null>(null);
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
 
   const handleLoadingComplete = useCallback(() => {
     setIsLoading(false);
@@ -38,16 +36,6 @@ export default function App() {
       ? items
       : items.filter((item) => item.kind === activeFilter);
 
-  const handleAddItem = (newItem: ArchiveItem) => {
-    setItems((prev) => [newItem, ...prev]);
-    setActiveFilter('tudo');
-  };
-
-  const handleDeleteItem = (id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    setSelectedItem(null);
-  };
-
   return (
     <div className="min-h-screen bg-[#F7F7F5] text-[#111111] flex flex-col">
       <AnimatePresence>
@@ -59,7 +47,7 @@ export default function App() {
       <Header
         activeFilter={activeFilter}
         onSelectFilter={setActiveFilter}
-        onOpenUpload={() => setIsUploadOpen(true)}
+        onReplayIntro={handleReplayIntro}
       />
 
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-5 md:px-8">
@@ -119,13 +107,6 @@ export default function App() {
           {visibleItems.length === 0 ? (
             <div className="py-24 text-center font-mono text-xs text-[#666662]">
               <p>nenhum arquivo neste filtro.</p>
-              <button
-                type="button"
-                onClick={() => setIsUploadOpen(true)}
-                className="mt-4 text-[#111111] underline underline-offset-4 hover:text-[#1A3AFF] cursor-pointer"
-              >
-                + subir mídia
-              </button>
             </div>
           ) : layoutMode === 'folha' ? (
             /* Contact Sheet View — Raw, Unboxed, Natural Proportions */
@@ -169,10 +150,10 @@ export default function App() {
                           />
                         ) : null}
 
-                        {item.kind === 'video' && (
+                        {item.kind === 'video' && item.videoUrl && item.duration && (
                           <span className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1.5 px-2 py-1 font-mono text-[11px] bg-[#0A0A09]/85 text-[#F7F7F5] border border-white/15 tabular-nums">
                             <Play className="w-2.5 h-2.5 fill-current" aria-hidden="true" />
-                            <span>{item.duration || '00:30'}</span>
+                            <span>{item.duration}</span>
                           </span>
                         )}
                       </div>
@@ -235,10 +216,10 @@ export default function App() {
                           />
                         ) : null}
 
-                        {item.kind === 'video' && (
+                        {item.kind === 'video' && item.videoUrl && item.duration && (
                           <span className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1 font-mono text-xs bg-[#0A0A09]/85 text-[#F7F7F5] border border-white/15 tabular-nums">
                             <Play className="w-3 h-3 fill-current" aria-hidden="true" />
-                            <span>{item.duration || '00:30'}</span>
+                            <span>{item.duration}</span>
                           </span>
                         )}
                       </div>
@@ -333,9 +314,9 @@ export default function App() {
           className="border-t border-[#DCDCD4] py-10 grid grid-cols-1 md:grid-cols-12 gap-6 text-xs font-mono text-[#666662]"
         >
           <div className="md:col-span-6 space-y-1.5">
-            <p className="text-[#111111]">coffee — arquivo aberto</p>
+            <p className="text-[#111111]">coffee</p>
             <p className="leading-relaxed max-w-md">
-              pasta pessoal de fotos em 35mm, vídeos curtos e notas visuais de rua. sem algoritmo, sem feed.
+              arquivo pessoal, feito para portifolios customizados
             </p>
           </div>
           <div className="md:col-span-6 md:text-right flex flex-col md:items-end justify-between gap-2">
@@ -348,20 +329,13 @@ export default function App() {
               </a>
               <button
                 type="button"
-                onClick={() => setIsUploadOpen(true)}
-                className="text-[#111111] hover:text-[#1A3AFF] underline underline-offset-4 cursor-pointer"
-              >
-                + subir arquivo
-              </button>
-              <button
-                type="button"
                 onClick={handleReplayIntro}
                 className="text-[#666662] hover:text-[#111111] underline underline-offset-4 cursor-pointer"
               >
                 rever abertura
               </button>
             </div>
-            <span className="tabular-nums">são paulo · 2024—2026</span>
+            <span>feito por vitor cezario</span>
           </div>
         </section>
       </main>
@@ -371,14 +345,6 @@ export default function App() {
         items={visibleItems}
         onClose={() => setSelectedItem(null)}
         onSelect={(next) => setSelectedItem(next)}
-        onDelete={handleDeleteItem}
-      />
-
-      <AddMediaModal
-        isOpen={isUploadOpen}
-        nextSequence={items.length + 1}
-        onClose={() => setIsUploadOpen(false)}
-        onAdd={handleAddItem}
       />
     </div>
   );
