@@ -4,7 +4,7 @@ import * as schema from './schema.ts';
 
 declare global {
   var _postgresPool: Pool | undefined;
-  var _vercelSchemaReady: Promise<void> | undefined;
+  var _externalSchemaReady: Promise<void> | undefined;
 }
 
 function resolveExternalDatabaseUrl(): string | undefined {
@@ -38,33 +38,33 @@ function resolveExternalDatabaseUrl(): string | undefined {
 }
 
 export function isDatabaseConfigured(): boolean {
-  return Boolean(process.env.SQL_HOST || resolveExternalDatabaseUrl());
+  return Boolean(resolveExternalDatabaseUrl() || process.env.SQL_HOST);
 }
 
 export const createPool = () => {
   if (!global._postgresPool) {
-    if (process.env.SQL_HOST) {
-      // AI Studio Cloud SQL Object Method
+    const externalUrl = resolveExternalDatabaseUrl();
+
+    if (externalUrl) {
+      // Shared external PostgreSQL (Vercel Storage / Neon / Supabase)
+      // Takes priority when configured so AI Studio preview and Vercel share one DB
+      const isLocal =
+        externalUrl.includes('localhost') || externalUrl.includes('127.0.0.1');
+
+      global._postgresPool = new Pool({
+        connectionString: externalUrl,
+        ssl: isLocal ? undefined : { rejectUnauthorized: false },
+        max: 5,
+        connectionTimeoutMillis: 15000,
+      });
+    } else {
+      // AI Studio Cloud SQL Object Method fallback
       global._postgresPool = new Pool({
         host: process.env.SQL_HOST,
         user: process.env.SQL_USER,
         password: process.env.SQL_PASSWORD,
         database: process.env.SQL_DB_NAME,
         max: 10,
-        connectionTimeoutMillis: 15000,
-      });
-    } else {
-      // Standard PostgreSQL connection string (Vercel Storage / Neon / Supabase)
-      const connectionString = resolveExternalDatabaseUrl();
-      const isLocal =
-        !connectionString ||
-        connectionString.includes('localhost') ||
-        connectionString.includes('127.0.0.1');
-
-      global._postgresPool = new Pool({
-        connectionString,
-        ssl: isLocal ? undefined : { rejectUnauthorized: false },
-        max: 5,
         connectionTimeoutMillis: 15000,
       });
     }
@@ -80,16 +80,14 @@ const pool = createPool();
 export const db = drizzle(pool, { schema });
 
 /**
- * Ensures tables exist when connecting to a fresh external PostgreSQL database
+ * Ensures tables exist when connecting to an external PostgreSQL database
  * (e.g., Neon / Supabase / Vercel Postgres) where Drizzle Kit has not been run yet.
- * Skipped automatically when running on AI Studio Cloud SQL (managed by Drizzle Kit).
  */
 export async function ensureExternalSchema(): Promise<void> {
-  if (process.env.SQL_HOST) return;
-  if (!isDatabaseConfigured()) return;
+  if (!resolveExternalDatabaseUrl()) return;
 
-  if (!global._vercelSchemaReady) {
-    global._vercelSchemaReady = (async () => {
+  if (!global._externalSchemaReady) {
+    global._externalSchemaReady = (async () => {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS "users" (
           "id" serial PRIMARY KEY NOT NULL,
@@ -130,10 +128,10 @@ export async function ensureExternalSchema(): Promise<void> {
         );
       `);
     })().catch((err) => {
-      global._vercelSchemaReady = undefined;
+      global._externalSchemaReady = undefined;
       throw err;
     });
   }
 
-  await global._vercelSchemaReady;
+  await global._externalSchemaReady;
 }
