@@ -7,12 +7,38 @@ declare global {
   var _vercelSchemaReady: Promise<void> | undefined;
 }
 
+function resolveExternalDatabaseUrl(): string | undefined {
+  const directCandidates = [
+    process.env.DATABASE_URL,
+    process.env.POSTGRES_URL,
+    process.env.POSTGRES_PRISMA_URL,
+    process.env.POSTGRES_URL_NON_POOLING,
+    process.env.STORAGE_DATABASE_URL,
+    process.env.STORAGE_POSTGRES_URL,
+    process.env.STORAGE_URL,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (candidate && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      key.endsWith('_URL') &&
+      typeof value === 'string' &&
+      (value.startsWith('postgres://') || value.startsWith('postgresql://'))
+    ) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
+}
+
 export function isDatabaseConfigured(): boolean {
-  return Boolean(
-    process.env.SQL_HOST ||
-      process.env.DATABASE_URL ||
-      process.env.POSTGRES_URL,
-  );
+  return Boolean(process.env.SQL_HOST || resolveExternalDatabaseUrl());
 }
 
 export const createPool = () => {
@@ -28,9 +54,8 @@ export const createPool = () => {
         connectionTimeoutMillis: 15000,
       });
     } else {
-      // Standard PostgreSQL connection string (Vercel Postgres / Neon / Supabase)
-      const connectionString =
-        process.env.DATABASE_URL || process.env.POSTGRES_URL;
+      // Standard PostgreSQL connection string (Vercel Storage / Neon / Supabase)
+      const connectionString = resolveExternalDatabaseUrl();
       const isLocal =
         !connectionString ||
         connectionString.includes('localhost') ||
